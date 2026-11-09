@@ -1,0 +1,33 @@
+@import 'tailwindcss';
+
+@source '../views';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+
+@theme {
+    --color-navy: #243359;
+    --color-gold: #d1b054;
+    --font-sans:
+        'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+        'Noto Color Emoji';
+}
+
+@layer base {
+    body {
+        background: white;
+        color: var(--color-navy);
+    }
+    :focus-visible {
+        outline: 2px solid currentColor;
+        outline-offset: 3px;
+    }
+    input[type='checkbox'] {
+        accent-color: var(--color-navy);
+    }
+    meter::-webkit-meter-optimum-value {
+        background: var(--color-navy);
+    }
+    meter::-moz-meter-bar {
+        background: var(--color-navy);
+    }
+}

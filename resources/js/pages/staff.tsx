@@ -1,25 +1,18 @@
 import { Head, Link, useForm } from '@inertiajs/react';
-import {
-    Activity,
-    ArrowUpRight,
-    CalendarDays,
-    CalendarRange,
-    ClipboardList,
-    Clock3,
-    Inbox,
-    TriangleAlert,
-} from 'lucide-react';
-import { useState } from 'react';
-import type { FormEvent } from 'react';
+import { ArrowUpRight } from 'lucide-react';
+import { useRef, useState } from 'react';
+import Notice from '../components/notice';
 import StaffLayout from '../components/staff-layout';
 import {
-    buttonClass,
-    dateTime,
     duration,
     fieldClass,
     linkClass,
-    statusColors,
+    longDate,
+    roleLabels,
+    siteLabel,
     statuses,
+    statusStyles,
+    timeOnly,
     visitationCorrectionMessage,
 } from '../lib/funeral';
 import type { Pagination } from '../lib/funeral';
@@ -58,39 +51,58 @@ type Props = {
         | null;
 };
 
-function ScheduleList({ label, rows }: { label: string; rows: Schedule[] }) {
+function ScheduleList({
+    label,
+    day,
+    rows,
+}: {
+    label: string;
+    day: string;
+    rows: Schedule[];
+}) {
     return (
         <section className="min-w-0 rounded-lg border border-navy/20">
-            <h3 className="border-b border-gold/70 px-4 py-2 font-semibold">
-                {label}
+            <h3 className="border-b border-navy/15 px-4 py-2 font-semibold">
+                {label}{' '}
+                <span className="block text-sm font-normal text-navy/75 sm:inline">
+                    {longDate(day)}
+                </span>
             </h3>
             {rows.length === 0 ? (
-                <p className="px-4 py-2 text-sm text-navy/75">
+                <p className="px-4 py-3 text-sm text-navy/75">
                     Belum ada jadwal.
                 </p>
             ) : (
                 <ul className="divide-y divide-navy/15">
                     {rows.map((row) => (
-                        <li key={row.id} className="space-y-1 px-4 py-3">
-                            <Link
-                                className={
-                                    linkClass +
-                                    ' inline-flex items-center gap-1 break-words'
-                                }
-                                href={'/staf/pengajuan/' + row.id}
-                            >
-                                {row.deceased_name}{' '}
-                                <ArrowUpRight
-                                    className="size-4 shrink-0"
-                                    aria-hidden="true"
-                                />
-                            </Link>
-                            <p className="text-sm">
-                                {dateTime(row.current_burial_at)}
+                        <li
+                            key={row.id}
+                            className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-3 px-4 py-3"
+                        >
+                            <p className="font-semibold tabular-nums">
+                                {timeOnly(row.current_burial_at)}
+                                <span className="block text-xs font-normal text-navy/75">
+                                    WIB
+                                </span>
                             </p>
-                            <p className="text-sm text-navy/75">
-                                {row.burial_site ?? 'Lokasi belum ditentukan'}
-                            </p>
+                            <div className="min-w-0">
+                                <Link
+                                    className={
+                                        linkClass +
+                                        ' inline-flex items-center gap-1 break-words'
+                                    }
+                                    href={'/staf/pengajuan/' + row.id}
+                                >
+                                    {row.deceased_name}{' '}
+                                    <ArrowUpRight
+                                        className="size-4 shrink-0"
+                                        aria-hidden="true"
+                                    />
+                                </Link>
+                                <p className="text-sm text-navy/75">
+                                    {siteLabel(row.burial_site)}
+                                </p>
+                            </div>
                         </li>
                     ))}
                 </ul>
@@ -99,9 +111,23 @@ function ScheduleList({ label, rows }: { label: string; rows: Schedule[] }) {
     );
 }
 
-function DailyBars({ counts, period }: { counts: number[]; period: string }) {
+function DailyBars({
+    counts,
+    period,
+    today,
+}: {
+    counts: number[];
+    period: string;
+    today: string;
+}) {
     const [hovered, setHovered] = useState<number | null>(null);
     const [focused, setFocused] = useState<number | null>(null);
+    const todayMonth = today.slice(0, 7);
+    const todayIndex = Number(today.slice(8, 10)) - 1;
+    const [cursor, setCursor] = useState(
+        period === todayMonth ? Math.min(todayIndex, counts.length - 1) : 0,
+    );
+    const buttons = useRef<(HTMLButtonElement | null)[]>([]);
     const active = hovered ?? focused;
     const peak = Math.max(1, ...counts);
     const interval = Math.ceil(peak / 4);
@@ -124,6 +150,18 @@ function DailyBars({ counts, period }: { counts: number[]; period: string }) {
                 period + '-' + String(day + 1).padStart(2, '0') + 'T00:00:00Z',
             ),
         );
+    // Past days are plain, today is tinted gold, days not yet reached are grey.
+    const when = (day: number): 'past' | 'today' | 'future' => {
+        if (period < todayMonth) return 'past';
+        if (period > todayMonth) return 'future';
+        return day < todayIndex
+            ? 'past'
+            : day === todayIndex
+              ? 'today'
+              : 'future';
+    };
+    const tint = { past: '', today: 'bg-gold/25', future: 'bg-navy/[0.04]' };
+    const whenLabel = { past: '', today: ', hari ini', future: ', belum tiba' };
 
     return (
         <div className="min-w-0 rounded-lg border border-navy/20 p-4">
@@ -156,20 +194,53 @@ function DailyBars({ counts, period }: { counts: number[]; period: string }) {
                             style={{ bottom: (value / max) * 100 + '%' }}
                         />
                     ))}
-                    <div className="relative grid h-full" style={grid}>
+                    <div
+                        role="group"
+                        aria-label="Pengajuan per hari, gunakan tombol panah"
+                        className="relative grid h-full"
+                        style={grid}
+                    >
                         {counts.map((count, day) => (
                             <button
                                 key={day}
+                                ref={(element) => {
+                                    buttons.current[day] = element;
+                                }}
                                 type="button"
+                                tabIndex={day === cursor ? 0 : -1}
                                 aria-label={
-                                    formatDay(day) + ': ' + count + ' pengajuan'
+                                    formatDay(day) +
+                                    whenLabel[when(day)] +
+                                    ': ' +
+                                    count +
+                                    ' pengajuan'
                                 }
-                                className="flex h-full min-w-0 items-end justify-center rounded-sm hover:bg-navy/5"
+                                className={
+                                    'flex h-full min-w-0 items-end justify-center rounded-sm hover:bg-navy/10 ' +
+                                    tint[when(day)]
+                                }
                                 onMouseEnter={() => setHovered(day)}
-                                onFocus={() => setFocused(day)}
+                                onFocus={() => {
+                                    setFocused(day);
+                                    setCursor(day);
+                                }}
                                 onBlur={() => setFocused(null)}
                                 onClick={() => setFocused(day)}
                                 onKeyDown={(event) => {
+                                    const moves: Record<string, number> = {
+                                        ArrowRight: day + 1,
+                                        ArrowLeft: day - 1,
+                                        Home: 0,
+                                        End: counts.length - 1,
+                                    };
+                                    if (event.key in moves) {
+                                        event.preventDefault();
+                                        const next = Math.min(
+                                            Math.max(moves[event.key], 0),
+                                            counts.length - 1,
+                                        );
+                                        buttons.current[next]?.focus();
+                                    }
                                     if (event.key === 'Escape') {
                                         setHovered(null);
                                         setFocused(null);
@@ -180,7 +251,9 @@ function DailyBars({ counts, period }: { counts: number[]; period: string }) {
                                     aria-hidden="true"
                                     className={
                                         'w-[68%] rounded-t-sm ' +
-                                        (active === day ? 'bg-gold' : 'bg-navy')
+                                        (active === day
+                                            ? 'bg-[#526B9F]'
+                                            : 'bg-navy')
                                     }
                                     style={{
                                         height: (count / max) * 100 + '%',
@@ -200,7 +273,8 @@ function DailyBars({ counts, period }: { counts: number[]; period: string }) {
                                     '%, calc(100% - 4.25rem))',
                             }}
                         >
-                            {formatDay(active)}:{' '}
+                            {formatDay(active)}
+                            {when(active) === 'today' && ' (hari ini)'}:{' '}
                             <strong>{counts[active]} pengajuan</strong>
                         </div>
                     )}
@@ -215,11 +289,13 @@ function DailyBars({ counts, period }: { counts: number[]; period: string }) {
                         <span
                             key={day}
                             className={
-                                day === 0 ||
-                                day === counts.length - 1 ||
-                                (day + 1) % 5 === 0
-                                    ? ''
-                                    : 'invisible xl:visible'
+                                when(day) === 'today'
+                                    ? 'rounded-sm bg-gold/60 font-semibold text-navy'
+                                    : day === 0 ||
+                                        day === counts.length - 1 ||
+                                        (day + 1) % 5 === 0
+                                      ? ''
+                                      : 'invisible xl:visible'
                             }
                         >
                             {day + 1}
@@ -228,6 +304,24 @@ function DailyBars({ counts, period }: { counts: number[]; period: string }) {
                 </div>
             </div>
             <p className="mt-2 text-center text-xs text-navy/75">Tanggal</p>
+            {period === todayMonth && (
+                <p className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-navy/75">
+                    <span className="inline-flex items-center gap-1.5">
+                        <span
+                            className="size-3 rounded-sm border border-gold bg-gold/25"
+                            aria-hidden="true"
+                        />
+                        Hari ini, {longDate(today)}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                        <span
+                            className="size-3 rounded-sm border border-navy/20 bg-navy/[0.04]"
+                            aria-hidden="true"
+                        />
+                        Belum tiba
+                    </span>
+                </p>
+            )}
         </div>
     );
 }
@@ -255,7 +349,7 @@ function StatusDistribution({
                                     <span
                                         className={
                                             'size-2 shrink-0 rounded-full ' +
-                                            statusColors[status]
+                                            statusStyles[status].dot
                                         }
                                         aria-hidden="true"
                                     />
@@ -277,7 +371,7 @@ function StatusDistribution({
                                 <div
                                     className={
                                         'h-full rounded-full ' +
-                                        statusColors[status]
+                                        statusStyles[status].dot
                                     }
                                     style={{ width: percent + '%' }}
                                 />
@@ -299,8 +393,10 @@ export default function Staff({
     deliveryAlerts,
 }: Props) {
     const form = useForm({ period });
-    function filter(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault();
+    function changePeriod(value: string) {
+        form.setData('period', value);
+        if (!value) return;
+        form.transform(() => ({ period: value }));
         form.get('/staf', { preserveScroll: true });
     }
     const periodTitle = new Intl.DateTimeFormat('id-ID', {
@@ -308,156 +404,152 @@ export default function Staff({
         year: 'numeric',
         timeZone: 'UTC',
     }).format(new Date(period + '-01T00:00:00Z'));
-    const kpis = [
-        {
-            label: 'Perlu ditindaklanjuti',
-            value: metrics.new_requests,
-            icon: ClipboardList,
-            href: '/staf/pengajuan?status=new_request',
-        },
-        {
-            label: 'Pengajuan masuk hari ini',
-            value: metrics.today,
-            icon: Inbox,
-        },
-    ];
+    const tomorrow = new Date(Date.parse(today + 'T00:00:00Z') + 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+    const waiting = metrics.new_requests;
+    const failed = deliveryAlerts?.data.some(
+        (alert) => alert.state === 'failed',
+    );
     return (
         <StaffLayout>
             <main className="space-y-5 p-4 sm:p-6 xl:px-8">
                 <Head title="Dasbor staf" />
-                <header className="border-b border-gold pb-4">
+                <header>
                     <h1 className="text-3xl font-semibold">Dasbor staf</h1>
                     <p className="mt-1 text-navy/75">
                         Ringkasan operasional dan jadwal pemakaman.
                     </p>
                 </header>
                 <div className="grid gap-4 sm:grid-cols-2">
-                    {kpis.map(({ label, value, icon: Icon, href }) => {
-                        const content = (
-                            <>
-                                <p className="flex items-center gap-2 font-medium">
-                                    <Icon
-                                        className="size-5"
-                                        aria-hidden="true"
-                                    />{' '}
-                                    {label}
-                                    {href && (
-                                        <ArrowUpRight
-                                            className="ml-auto size-4"
-                                            aria-hidden="true"
-                                        />
-                                    )}
-                                </p>
-                                <p className="mt-1 text-4xl leading-tight font-semibold tabular-nums">
-                                    {value.toLocaleString('id-ID')}
-                                </p>
-                            </>
-                        );
-                        const card =
-                            'min-w-0 rounded-lg border border-t-3 border-navy/20 border-t-gold px-4 py-3';
-                        return href ? (
-                            <Link
-                                key={label}
-                                href={href}
-                                className={card + ' hover:bg-navy/5'}
-                            >
-                                {content}
-                            </Link>
-                        ) : (
-                            <div key={label} className={card}>
-                                {content}
-                            </div>
-                        );
-                    })}
+                    <Link
+                        href="/staf/pengajuan?status=new_request"
+                        className={
+                            'min-w-0 rounded-lg border px-4 py-3 ' +
+                            (waiting > 0
+                                ? 'border-warning/60 bg-warning-soft hover:bg-warning-soft/70'
+                                : 'border-navy/20 hover:bg-navy/5')
+                        }
+                    >
+                        <p className="flex items-center gap-2 font-medium">
+                            Perlu ditindaklanjuti
+                            <ArrowUpRight
+                                className="ml-auto size-4"
+                                aria-hidden="true"
+                            />
+                        </p>
+                        <p
+                            className={
+                                'mt-1 text-4xl leading-tight font-semibold tabular-nums ' +
+                                (waiting > 0 ? 'text-warning' : '')
+                            }
+                        >
+                            {waiting.toLocaleString('id-ID')}
+                        </p>
+                    </Link>
+                    <div className="min-w-0 rounded-lg border border-navy/20 px-4 py-3">
+                        <p className="font-medium">Pengajuan masuk hari ini</p>
+                        <p className="mt-1 text-4xl leading-tight font-semibold tabular-nums">
+                            {metrics.today.toLocaleString('id-ID')}
+                        </p>
+                    </div>
                 </div>
                 {deliveryAlerts && deliveryAlerts.total > 0 && (
-                    <section
-                        id="whatsapp"
-                        className="space-y-3 rounded-lg border border-gold bg-gold/10 p-4"
-                    >
-                        <h2 className="flex items-center gap-2 font-semibold">
-                            <TriangleAlert
-                                className="size-5"
-                                aria-hidden="true"
-                            />{' '}
-                            Pengiriman perlu diperiksa ({deliveryAlerts.total})
-                        </h2>
-                        <ul className="space-y-1">
-                            {deliveryAlerts.data.map((alert) => (
-                                <li
-                                    key={alert.source + '-' + alert.id}
-                                    className="text-sm break-words"
+                    <section id="whatsapp">
+                        <Notice
+                            tone={failed ? 'danger' : 'warning'}
+                            title={
+                                'Pengiriman perlu diperiksa (' +
+                                deliveryAlerts.total +
+                                ')'
+                            }
+                            className="space-y-2"
+                        >
+                            <ul className="space-y-1">
+                                {deliveryAlerts.data.map((alert) => (
+                                    <li
+                                        key={alert.source + '-' + alert.id}
+                                        className="break-words"
+                                    >
+                                        <Link
+                                            className={linkClass}
+                                            href={
+                                                '/staf/pengajuan/' +
+                                                alert.funeral_request_id
+                                            }
+                                        >
+                                            {alert.reference_code}
+                                        </Link>
+                                        {', '}
+                                        {alert.source === 'visitation'
+                                            ? 'Tautan ziarah'
+                                            : alert.recipient_role
+                                              ? (roleLabels[
+                                                    alert.recipient_role
+                                                ] ?? alert.recipient_role)
+                                              : 'Pemohon'}
+                                        {', '}
+                                        <strong>
+                                            {alert.state === 'failed'
+                                                ? 'Gagal'
+                                                : 'Hasil belum pasti'}
+                                        </strong>
+                                        {alert.last_error_code &&
+                                            alert.validation_fields.length ===
+                                                0 &&
+                                            ' (Kode ' +
+                                                alert.last_error_code +
+                                                ')'}
+                                        {alert.validation_fields.length > 0 && (
+                                            <span className="mt-1 block">
+                                                {visitationCorrectionMessage(
+                                                    alert.validation_fields,
+                                                )}
+                                            </span>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                            {(deliveryAlerts.prev_page_url ||
+                                deliveryAlerts.next_page_url) && (
+                                <nav
+                                    aria-label="Halaman notifikasi WhatsApp"
+                                    className="flex gap-3"
                                 >
-                                    <Link
-                                        className={linkClass}
-                                        href={
-                                            '/staf/pengajuan/' +
-                                            alert.funeral_request_id
-                                        }
-                                    >
-                                        {alert.reference_code}
-                                    </Link>
-                                    {', '}
-                                    {alert.source === 'visitation'
-                                        ? 'Tautan ziarah'
-                                        : (alert.recipient_role ?? 'Pemohon')}
-                                    {', '}
-                                    {alert.state === 'failed'
-                                        ? 'Gagal'
-                                        : 'Hasil belum pasti'}
-                                    {alert.last_error_code &&
-                                        alert.validation_fields.length === 0 &&
-                                        ' (Kode ' + alert.last_error_code + ')'}
-                                    {alert.validation_fields.length > 0 && (
-                                        <p className="mt-1 text-sm text-navy/80">
-                                            {visitationCorrectionMessage(
-                                                alert.validation_fields,
-                                            )}
-                                        </p>
+                                    {deliveryAlerts.prev_page_url && (
+                                        <Link
+                                            className={linkClass}
+                                            href={deliveryAlerts.prev_page_url}
+                                        >
+                                            Sebelumnya
+                                        </Link>
                                     )}
-                                </li>
-                            ))}
-                        </ul>
-                        {(deliveryAlerts.prev_page_url ||
-                            deliveryAlerts.next_page_url) && (
-                            <nav
-                                aria-label="Halaman notifikasi WhatsApp"
-                                className="flex gap-3 text-sm"
-                            >
-                                {deliveryAlerts.prev_page_url && (
-                                    <Link
-                                        className={linkClass}
-                                        href={deliveryAlerts.prev_page_url}
-                                    >
-                                        Sebelumnya
-                                    </Link>
-                                )}
-                                {deliveryAlerts.next_page_url && (
-                                    <Link
-                                        className={linkClass}
-                                        href={deliveryAlerts.next_page_url}
-                                    >
-                                        Berikutnya
-                                    </Link>
-                                )}
-                            </nav>
-                        )}
+                                    {deliveryAlerts.next_page_url && (
+                                        <Link
+                                            className={linkClass}
+                                            href={deliveryAlerts.next_page_url}
+                                        >
+                                            Berikutnya
+                                        </Link>
+                                    )}
+                                </nav>
+                            )}
+                        </Notice>
                     </section>
                 )}
                 <section className="space-y-3">
-                    <h2 className="flex items-center gap-2 text-xl font-semibold">
-                        <CalendarDays className="size-5" aria-hidden="true" />{' '}
-                        Jadwal pemakaman
-                    </h2>
+                    <h2 className="text-xl font-semibold">Jadwal pemakaman</h2>
                     <div className="grid gap-4 md:grid-cols-2">
                         <ScheduleList
                             label="Hari ini"
+                            day={today}
                             rows={schedule.filter(
                                 (row) => row.schedule_day === today,
                             )}
                         />
                         <ScheduleList
                             label="Besok"
+                            day={tomorrow}
                             rows={schedule.filter(
                                 (row) => row.schedule_day !== today,
                             )}
@@ -468,18 +560,14 @@ export default function Staff({
                     className="space-y-3"
                     aria-labelledby="analytics-heading"
                 >
-                    <header className="flex flex-wrap items-end justify-between gap-3 border-b border-gold pb-3">
+                    <header className="flex flex-wrap items-end justify-between gap-3 border-b border-navy/15 pb-3">
                         <h2
                             id="analytics-heading"
-                            className="flex items-center gap-2 text-xl font-semibold"
+                            className="text-xl font-semibold"
                         >
-                            <Activity className="size-5" aria-hidden="true" />{' '}
                             Analitik {periodTitle}
                         </h2>
-                        <form
-                            onSubmit={filter}
-                            className="flex flex-wrap items-end gap-2"
-                        >
+                        <div>
                             <label className="text-sm font-medium">
                                 Periode
                                 <input
@@ -488,33 +576,23 @@ export default function Staff({
                                     type="month"
                                     value={form.data.period}
                                     onChange={(event) =>
-                                        form.setData(
-                                            'period',
-                                            event.target.value,
-                                        )
+                                        changePeriod(event.target.value)
                                     }
                                 />
                             </label>
-                            <button
-                                className={buttonClass}
-                                disabled={form.processing}
-                            >
-                                Terapkan
-                            </button>
                             {form.errors.period && (
-                                <p role="alert" className="w-full text-sm">
+                                <p
+                                    role="alert"
+                                    className="mt-1 text-sm text-danger"
+                                >
                                     {form.errors.period}
                                 </p>
                             )}
-                        </form>
+                        </div>
                     </header>
                     <dl className="grid gap-3 sm:grid-cols-2">
                         <div className="rounded-lg border border-navy/20 px-4 py-3">
-                            <dt className="flex items-center gap-2 text-sm font-medium">
-                                <CalendarRange
-                                    className="size-4"
-                                    aria-hidden="true"
-                                />{' '}
+                            <dt className="text-sm font-medium">
                                 Pengajuan periode ini
                             </dt>
                             <dd className="mt-1 text-4xl leading-tight font-semibold tabular-nums">
@@ -522,8 +600,7 @@ export default function Staff({
                             </dd>
                         </div>
                         <div className="rounded-lg border border-navy/20 px-4 py-3">
-                            <dt className="flex items-center gap-2 text-sm font-medium">
-                                <Clock3 className="size-4" aria-hidden="true" />{' '}
+                            <dt className="text-sm font-medium">
                                 Rata-rata respons pertama
                             </dt>
                             <dd
@@ -543,6 +620,7 @@ export default function Staff({
                                 key={period}
                                 counts={analytics.trend}
                                 period={period}
+                                today={today}
                             />
                             <StatusDistribution
                                 distribution={analytics.distribution}

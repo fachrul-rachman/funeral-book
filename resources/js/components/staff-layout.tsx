@@ -11,7 +11,9 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { roleLabels } from '../lib/funeral';
 import type { Auth } from '../types/auth';
+import Notice from './notice';
 
 export default function StaffLayout({ children }: { children: ReactNode }) {
     const {
@@ -47,7 +49,7 @@ export default function StaffLayout({ children }: { children: ReactNode }) {
                     : 'min-h-dvh lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]'
             }
         >
-            <aside className="border-b-4 border-gold bg-navy text-white lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col lg:self-start lg:border-r-4 lg:border-b-0">
+            <aside className="bg-navy text-white lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col lg:self-start">
                 <div className="flex min-h-18 items-center justify-between gap-2 px-4">
                     <Link
                         href="/staf"
@@ -145,6 +147,10 @@ export default function StaffLayout({ children }: { children: ReactNode }) {
                         })}
                     </nav>
                     <div className="mt-3 border-t border-white/20 pt-3 lg:mt-auto">
+                        <p className="px-3 pb-2 text-sm text-white/80 lg:hidden">
+                            {auth.user?.name}
+                            {auth.user && ', ' + roleLabels[auth.user.role]}
+                        </p>
                         <Link
                             href="/keluar"
                             method="post"
@@ -164,17 +170,20 @@ export default function StaffLayout({ children }: { children: ReactNode }) {
                 </div>
             </aside>
             <div className="min-w-0">
-                <header className="hidden min-h-14 items-center justify-between gap-3 border-b border-gold/60 px-6 text-sm lg:flex">
-                    <span className="font-medium">Operasional pemakaman</span>
-                    <span className="min-w-0 truncate">{auth.user?.name}</span>
+                <header className="hidden min-h-14 items-center justify-end gap-3 border-b border-navy/15 px-6 text-sm lg:flex">
+                    <span className="min-w-0 truncate font-medium">
+                        {auth.user?.name}
+                    </span>
+                    {auth.user && (
+                        <span className="shrink-0 rounded-full border border-navy/30 px-2.5 py-0.5 text-xs font-medium">
+                            {roleLabels[auth.user.role]}
+                        </span>
+                    )}
                 </header>
                 {errors.session && (
-                    <p
-                        role="alert"
-                        className="mx-4 mt-4 rounded-lg border border-gold bg-gold/10 p-3 text-sm sm:mx-6"
-                    >
+                    <Notice tone="warning" className="mx-4 mt-4 sm:mx-6">
                         {errors.session}
-                    </p>
+                    </Notice>
                 )}
                 {children}
             </div>

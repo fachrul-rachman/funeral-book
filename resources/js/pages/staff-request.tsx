@@ -1,7 +1,9 @@
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { ArrowLeft, CircleDot, History, RefreshCw } from 'lucide-react';
+import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import ConfirmDialog from '../components/confirm-dialog';
+import Notice from '../components/notice';
 import StaffLayout from '../components/staff-layout';
 import StaffRequestData, {
     DetailValue,
@@ -11,15 +13,17 @@ import StaffRequestDocuments, {
     FilePicker,
 } from '../components/staff-request-documents';
 import type { RequestDocument } from '../components/staff-request-documents';
+import StatusBadge from '../components/status-badge';
 import {
     buttonClass,
+    dangerButtonClass,
     dateTime,
     documentLabels,
     duration,
     fieldClass,
     linkClass,
-    statusColors,
-    statuses,
+    roleLabels,
+    secondaryButtonClass,
     visitationCorrectionMessage,
 } from '../lib/funeral';
 
@@ -80,39 +84,35 @@ function NotificationRetry({
     url: string;
 }) {
     const form = useForm({ acknowledge_uncertain: false });
-    function retry(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault();
-        const uncertain = delivery.state === 'unknown';
-        if (
-            uncertain &&
-            !window.confirm(
-                'Pesan sebelumnya mungkin sudah terkirim. Mengirim ulang dapat membuat penerima menerima pesan ganda. Tetap kirim ulang?',
-            )
-        )
-            return;
+    const [confirming, setConfirming] = useState(false);
+    const uncertain = delivery.state === 'unknown';
+    function send() {
         form.transform(() => ({ acknowledge_uncertain: uncertain }));
         form.post(url + '/notifikasi/' + delivery.id + '/kirim-ulang', {
             preserveScroll: true,
         });
     }
+    function retry(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        if (uncertain) setConfirming(true);
+        else send();
+    }
     return (
         <li className="space-y-2 py-3 first:pt-0 last:pb-0">
-            <p className="text-sm font-medium">
+            <p className="font-medium">
                 {delivery.event_type === 'completed'
                     ? 'Pesan customer'
                     : 'Notifikasi tim (' +
-                      (delivery.recipient_role?.toUpperCase() ?? 'Staf') +
+                      (roleLabels[delivery.recipient_role ?? ''] ?? 'Staf') +
                       ')'}
             </p>
-            <p className="text-sm text-navy/80">
-                {delivery.state === 'unknown'
+            <p>
+                {uncertain
                     ? 'Hasil pengiriman belum diketahui. Pesan mungkin sudah terkirim.'
                     : 'Pesan belum berhasil dikirim. Periksa penyebabnya sebelum mencoba lagi.'}
             </p>
             {delivery.last_error_code && (
-                <p className="text-xs text-navy/65">
-                    Kode: {delivery.last_error_code}
-                </p>
+                <p className="text-xs">Kode: {delivery.last_error_code}</p>
             )}
             {delivery.can_retry && (
                 <form onSubmit={retry} className="space-y-2">
@@ -120,7 +120,7 @@ function NotificationRetry({
                         <p
                             key={message}
                             role="alert"
-                            className="text-sm text-red-900"
+                            className="font-medium text-danger"
                         >
                             {message}
                         </p>
@@ -132,11 +132,25 @@ function NotificationRetry({
                         <RefreshCw className="size-4" aria-hidden="true" />
                         {form.processing
                             ? 'Menjadwalkan…'
-                            : delivery.state === 'unknown'
+                            : uncertain
                               ? 'Konfirmasi dan kirim ulang'
                               : 'Coba kirim ulang'}
                     </button>
                 </form>
+            )}
+            {confirming && (
+                <ConfirmDialog
+                    title="Kirim ulang pesan?"
+                    confirmLabel="Tetap kirim ulang"
+                    onCancel={() => setConfirming(false)}
+                    onConfirm={() => {
+                        setConfirming(false);
+                        send();
+                    }}
+                >
+                    Pesan sebelumnya mungkin sudah terkirim. Mengirim ulang
+                    dapat membuat penerima menerima pesan ganda.
+                </ConfirmDialog>
             )}
         </li>
     );
@@ -198,6 +212,9 @@ function StatusPanel({
         contact_evidence: null as File | null,
     });
     const transfer = useForm({ recipient_id: '' });
+    const [confirming, setConfirming] = useState<
+        'completed' | 'cancelled' | null
+    >(null);
     const next =
         request.status === 'new_request'
             ? 'contacted'
@@ -205,25 +222,7 @@ function StatusPanel({
               ? 'in_progress'
               : 'completed';
 
-    function changeStatus(event: FormEvent<HTMLFormElement>, target: string) {
-        event.preventDefault();
-        if (target === 'contacted' && !status.data.contact_evidence) {
-            status.setError(
-                'contact_evidence',
-                'Pilih foto bukti kontak terlebih dahulu.',
-            );
-            return;
-        }
-        if (
-            target === 'completed' &&
-            !window.confirm('Konfirmasi bahwa pemakaman telah selesai?')
-        )
-            return;
-        if (
-            target === 'cancelled' &&
-            !window.confirm('Konfirmasi pembatalan pengajuan ini?')
-        )
-            return;
+    function submitStatus(target: string) {
         status.transform((data) => ({
             expected_status: request.status,
             target,
@@ -237,86 +236,30 @@ function StatusPanel({
         });
     }
 
+    function changeStatus(event: FormEvent<HTMLFormElement>, target: string) {
+        event.preventDefault();
+        if (target === 'contacted' && !status.data.contact_evidence) {
+            status.setError(
+                'contact_evidence',
+                'Pilih foto bukti kontak terlebih dahulu.',
+            );
+            return;
+        }
+        if (target === 'completed' || target === 'cancelled') {
+            setConfirming(target);
+            return;
+        }
+        submitStatus(target);
+    }
+
+    const failedDelivery = notificationFailures.some(
+        (delivery) => delivery.state === 'failed',
+    );
+
     return (
         <section className="order-1 min-w-0 space-y-4 rounded-lg border border-navy/15 bg-white p-4 sm:p-5">
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-                <CircleDot className="size-5" aria-hidden="true" /> Status dan
-                tindakan
-            </h2>
-            <dl className="grid grid-cols-1 gap-3 border-b border-navy/15 pb-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                <DetailValue
-                    className="sm:col-span-2 lg:col-span-1 xl:col-span-2"
-                    label="Penanggung jawab"
-                    value={request.handler_name ?? 'Belum ditetapkan'}
-                />
-                <DetailValue
-                    label="Waktu masuk"
-                    value={dateTime(request.submitted_at)}
-                />
-                <DetailValue
-                    label="Respons pertama"
-                    value={duration(request.response_seconds)}
-                />
-            </dl>
-            {notice && (
-                <p
-                    role="alert"
-                    className="rounded border border-navy/15 bg-gold/10 p-3 text-sm"
-                >
-                    {notice}
-                </p>
-            )}
-            {request.completed_at && (
-                <p className="text-sm">
-                    Selesai: {dateTime(request.completed_at)}
-                </p>
-            )}
-            {request.cancelled_at && (
-                <div className="space-y-1 text-sm">
-                    <p>Dibatalkan: {dateTime(request.cancelled_at)}</p>
-                    <p className="break-words">
-                        Alasan: {request.cancellation_reason}
-                    </p>
-                </div>
-            )}
-            {visitation && (
-                <div className="space-y-1 rounded-md border border-navy/15 p-3 text-sm">
-                    <p className="font-medium">Tautan ziarah</p>
-                    <p>
-                        {visitation.validation_fields.length > 0
-                            ? visitationCorrectionMessage(
-                                  visitation.validation_fields,
-                              )
-                            : visitation.state === 'ready'
-                              ? 'Tautan berhasil diperoleh'
-                              : visitation.state === 'failed'
-                                ? 'Tautan belum berhasil diperoleh. Pesan customer ditahan.'
-                                : 'Menunggu tautan sebelum pesan customer dikirim.'}
-                    </p>
-                    {visitation.last_error_code &&
-                        visitation.validation_fields.length === 0 && (
-                            <p className="text-xs text-navy/70">
-                                Kode: {visitation.last_error_code}
-                            </p>
-                        )}
-                </div>
-            )}
-            {notificationFailures.length > 0 && (
-                <div className="space-y-3 rounded-md border border-gold/60 bg-gold/5 p-3">
-                    <h3 className="text-sm font-semibold">
-                        Notifikasi WhatsApp
-                    </h3>
-                    <ul className="divide-y divide-navy/15">
-                        {notificationFailures.map((delivery) => (
-                            <NotificationRetry
-                                key={delivery.id}
-                                delivery={delivery}
-                                url={url}
-                            />
-                        ))}
-                    </ul>
-                </div>
-            )}
+            <h2 className="text-lg font-semibold">Status dan tindakan</h2>
+            {notice && <Notice tone="info">{notice}</Notice>}
             {!canProcess && (
                 <p className="text-sm font-medium text-navy/70">
                     Akses baca saja
@@ -331,49 +274,52 @@ function StatusPanel({
             {canProcess && (
                 <>
                     {Object.keys(status.errors).length > 0 && (
-                        <ul
-                            role="alert"
-                            className="space-y-1 rounded-md border border-navy/15 bg-gold/10 p-3 text-sm"
-                        >
-                            {Object.entries(status.errors).map(
-                                ([field, message]) => {
-                                    const anchor =
-                                        field !== 'contact_evidence' &&
-                                        field in documentLabels
-                                            ? 'dokumen'
-                                            : [
-                                                    'has_plot',
-                                                    'applicant_whatsapp',
-                                                    'relationship_to_deceased',
-                                                    'burial_site',
-                                                    'zone',
-                                                    'lot_number',
-                                                    'paid_in_full',
-                                                    'current_burial_at',
-                                                ].includes(field)
-                                              ? 'data-pengajuan'
-                                              : null;
-                                    return (
-                                        <li key={field}>
-                                            {anchor ? (
-                                                <a
-                                                    className={linkClass}
-                                                    href={'#' + anchor}
-                                                >
-                                                    {validationLabels[field]}
-                                                </a>
-                                            ) : (
-                                                validationLabels[field]
-                                            )}
-                                            {validationLabels[field]
-                                                ? ': '
-                                                : ''}
-                                            {message}
-                                        </li>
-                                    );
-                                },
-                            )}
-                        </ul>
+                        <Notice tone="danger" title="Tidak bisa dilanjutkan">
+                            <ul className="space-y-1">
+                                {Object.entries(status.errors).map(
+                                    ([field, message]) => {
+                                        const anchor =
+                                            field !== 'contact_evidence' &&
+                                            field in documentLabels
+                                                ? 'dokumen'
+                                                : [
+                                                        'has_plot',
+                                                        'applicant_whatsapp',
+                                                        'relationship_to_deceased',
+                                                        'burial_site',
+                                                        'zone',
+                                                        'lot_number',
+                                                        'paid_in_full',
+                                                        'current_burial_at',
+                                                    ].includes(field)
+                                                  ? 'data-pengajuan'
+                                                  : null;
+                                        return (
+                                            <li key={field}>
+                                                {anchor ? (
+                                                    <a
+                                                        className={linkClass}
+                                                        href={'#' + anchor}
+                                                    >
+                                                        {
+                                                            validationLabels[
+                                                                field
+                                                            ]
+                                                        }
+                                                    </a>
+                                                ) : (
+                                                    validationLabels[field]
+                                                )}
+                                                {validationLabels[field]
+                                                    ? ': '
+                                                    : ''}
+                                                {message}
+                                            </li>
+                                        );
+                                    },
+                                )}
+                            </ul>
+                        </Notice>
                     )}
                     <form
                         onSubmit={(event) => changeStatus(event, next)}
@@ -420,97 +366,204 @@ function StatusPanel({
                                   : 'Selesaikan pengajuan'}
                         </button>
                     </form>
-                    {canTransfer && (
-                        <form
-                            onSubmit={(event) => {
-                                event.preventDefault();
-                                transfer.post(url + '/penanggung-jawab', {
-                                    preserveScroll: true,
-                                    onSuccess: () => transfer.reset(),
-                                });
-                            }}
-                            className="space-y-2 border-t border-navy/15 pt-3"
-                        >
-                            <label className="block text-sm font-medium">
-                                Alihkan penanggung jawab
-                                <select
-                                    className={fieldClass + ' mt-1'}
-                                    required
-                                    value={transfer.data.recipient_id}
-                                    onChange={(event) =>
-                                        transfer.setData(
-                                            'recipient_id',
-                                            event.target.value,
-                                        )
-                                    }
-                                >
-                                    <option value="">Pilih staf aktif</option>
-                                    {handlers
-                                        .filter(
-                                            (handler) =>
-                                                handler.id !==
-                                                request.responsible_user_id,
-                                        )
-                                        .map((handler) => (
-                                            <option
-                                                key={handler.id}
-                                                value={handler.id}
-                                            >
-                                                {handler.name} ({handler.role})
-                                            </option>
-                                        ))}
-                                </select>
-                            </label>
-                            {transfer.errors.recipient_id && (
-                                <p
-                                    role="alert"
-                                    className="text-sm text-red-900"
-                                >
-                                    {transfer.errors.recipient_id}
-                                </p>
-                            )}
-                            <button
-                                className={linkClass + ' min-h-9 text-sm'}
-                                disabled={transfer.processing}
-                            >
-                                Alihkan
-                            </button>
-                        </form>
-                    )}
-                    <details className="border-t border-navy/15 pt-3">
-                        <summary className="cursor-pointer text-sm font-medium text-red-800">
-                            Batalkan pengajuan
-                        </summary>
-                        <form
-                            onSubmit={(event) =>
-                                changeStatus(event, 'cancelled')
-                            }
-                            className="mt-3 space-y-2"
-                        >
-                            <label className="block text-sm font-medium">
-                                Alasan pembatalan
-                                <textarea
-                                    className={fieldClass + ' mt-1'}
-                                    required
-                                    maxLength={2000}
-                                    value={status.data.reason}
-                                    onChange={(event) =>
-                                        status.setData(
-                                            'reason',
-                                            event.target.value,
-                                        )
-                                    }
-                                />
-                            </label>
-                            <button
-                                className="min-h-10 rounded-md border border-red-900/30 px-3 text-sm font-medium text-red-800 hover:bg-red-50"
-                                disabled={status.processing}
-                            >
-                                Konfirmasi pembatalan
-                            </button>
-                        </form>
-                    </details>
                 </>
+            )}
+            {visitation && (
+                <Notice
+                    tone={
+                        visitation.validation_fields.length > 0
+                            ? 'warning'
+                            : visitation.state === 'failed'
+                              ? 'danger'
+                              : 'info'
+                    }
+                    title="Tautan ziarah"
+                >
+                    <p>
+                        {visitation.validation_fields.length > 0
+                            ? visitationCorrectionMessage(
+                                  visitation.validation_fields,
+                              )
+                            : visitation.state === 'ready'
+                              ? 'Tautan berhasil diperoleh'
+                              : visitation.state === 'failed'
+                                ? 'Tautan belum berhasil diperoleh. Pesan customer ditahan.'
+                                : 'Menunggu tautan sebelum pesan customer dikirim.'}
+                    </p>
+                    {visitation.last_error_code &&
+                        visitation.validation_fields.length === 0 && (
+                            <p className="text-xs">
+                                Kode: {visitation.last_error_code}
+                            </p>
+                        )}
+                </Notice>
+            )}
+            {notificationFailures.length > 0 && (
+                <Notice
+                    tone={failedDelivery ? 'danger' : 'warning'}
+                    title="Notifikasi WhatsApp"
+                >
+                    <ul className="divide-y divide-navy/15">
+                        {notificationFailures.map((delivery) => (
+                            <NotificationRetry
+                                key={delivery.id}
+                                delivery={delivery}
+                                url={url}
+                            />
+                        ))}
+                    </ul>
+                </Notice>
+            )}
+            <dl className="grid grid-cols-1 gap-3 border-t border-navy/15 pt-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                <DetailValue
+                    className="sm:col-span-2 lg:col-span-1 xl:col-span-2"
+                    label="Penanggung jawab"
+                    value={request.handler_name ?? 'Belum ditetapkan'}
+                />
+                <DetailValue
+                    label="Waktu masuk"
+                    value={dateTime(request.submitted_at)}
+                />
+                <DetailValue
+                    label="Respons pertama"
+                    value={duration(request.response_seconds)}
+                />
+            </dl>
+            {request.completed_at && (
+                <p className="text-sm">
+                    Selesai: {dateTime(request.completed_at)}
+                </p>
+            )}
+            {request.cancelled_at && (
+                <div className="space-y-1 text-sm">
+                    <p>Dibatalkan: {dateTime(request.cancelled_at)}</p>
+                    <p className="break-words">
+                        Alasan: {request.cancellation_reason}
+                    </p>
+                </div>
+            )}
+            {canProcess && canTransfer && (
+                <details className="border-t border-navy/15 pt-3">
+                    <summary className="cursor-pointer text-sm font-medium">
+                        Alihkan penanggung jawab
+                    </summary>
+                    <form
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            transfer.post(url + '/penanggung-jawab', {
+                                preserveScroll: true,
+                                onSuccess: () => transfer.reset(),
+                            });
+                        }}
+                        className="mt-3 space-y-2"
+                    >
+                        <label className="block text-sm font-medium">
+                            Staf penerima
+                            <select
+                                className={fieldClass + ' mt-1'}
+                                required
+                                value={transfer.data.recipient_id}
+                                onChange={(event) =>
+                                    transfer.setData(
+                                        'recipient_id',
+                                        event.target.value,
+                                    )
+                                }
+                            >
+                                <option value="">Pilih staf aktif</option>
+                                {handlers
+                                    .filter(
+                                        (handler) =>
+                                            handler.id !==
+                                            request.responsible_user_id,
+                                    )
+                                    .map((handler) => (
+                                        <option
+                                            key={handler.id}
+                                            value={handler.id}
+                                        >
+                                            {handler.name} (
+                                            {roleLabels[handler.role] ??
+                                                handler.role}
+                                            )
+                                        </option>
+                                    ))}
+                            </select>
+                        </label>
+                        {transfer.errors.recipient_id && (
+                            <p role="alert" className="text-sm text-danger">
+                                {transfer.errors.recipient_id}
+                            </p>
+                        )}
+                        <button
+                            className={secondaryButtonClass}
+                            disabled={transfer.processing}
+                        >
+                            Alihkan
+                        </button>
+                    </form>
+                </details>
+            )}
+            {canProcess && (
+                <details className="border-t border-navy/15 pt-3">
+                    <summary className="cursor-pointer text-sm font-medium text-danger">
+                        Batalkan pengajuan
+                    </summary>
+                    <form
+                        onSubmit={(event) => changeStatus(event, 'cancelled')}
+                        className="mt-3 space-y-2"
+                    >
+                        <label className="block text-sm font-medium">
+                            Alasan pembatalan
+                            <textarea
+                                className={fieldClass + ' mt-1'}
+                                required
+                                maxLength={2000}
+                                value={status.data.reason}
+                                onChange={(event) =>
+                                    status.setData('reason', event.target.value)
+                                }
+                            />
+                        </label>
+                        <button
+                            className={dangerButtonClass}
+                            disabled={status.processing}
+                        >
+                            Batalkan pengajuan ini
+                        </button>
+                    </form>
+                </details>
+            )}
+            {confirming === 'completed' && (
+                <ConfirmDialog
+                    title="Selesaikan pengajuan?"
+                    confirmLabel="Ya, pemakaman telah selesai"
+                    busy={status.processing}
+                    onCancel={() => setConfirming(null)}
+                    onConfirm={() => {
+                        setConfirming(null);
+                        submitStatus('completed');
+                    }}
+                >
+                    Konfirmasi bahwa pemakaman telah selesai. Setelah
+                    diselesaikan, data pengajuan tidak bisa diubah lagi.
+                </ConfirmDialog>
+            )}
+            {confirming === 'cancelled' && (
+                <ConfirmDialog
+                    title="Batalkan pengajuan ini?"
+                    confirmLabel="Ya, batalkan"
+                    danger
+                    busy={status.processing}
+                    onCancel={() => setConfirming(null)}
+                    onConfirm={() => {
+                        setConfirming(null);
+                        submitStatus('cancelled');
+                    }}
+                >
+                    Pengajuan yang dibatalkan tidak bisa diubah lagi. Alasan
+                    pembatalan: {status.data.reason}
+                </ConfirmDialog>
             )}
         </section>
     );
@@ -550,10 +603,7 @@ function ActivityTimeline({
             id="riwayat"
             className="order-4 min-w-0 space-y-3 rounded-lg border border-navy/15 bg-white p-4 sm:p-5"
         >
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-                <History className="size-5" aria-hidden="true" /> Riwayat
-                aktivitas
-            </h2>
+            <h2 className="text-lg font-semibold">Riwayat aktivitas</h2>
             <ol className="ml-1.5 border-l border-navy/15">
                 {activity.data.map((entry) => {
                     const document = entry.document_type
@@ -580,7 +630,7 @@ function ActivityTimeline({
                             <p className="text-sm break-words text-navy/75">
                                 {entry.actor}
                             </p>
-                            <p className="text-xs text-navy/65">
+                            <p className="text-xs text-navy/75">
                                 {dateTime(entry.occurred_at)}
                             </p>
                         </li>
@@ -588,7 +638,7 @@ function ActivityTimeline({
                 })}
             </ol>
             {failed && (
-                <p role="alert" className="text-sm text-red-900">
+                <p role="alert" className="text-sm font-medium text-danger">
                     Riwayat tambahan gagal dimuat. Coba lagi.
                 </p>
             )}
@@ -609,9 +659,6 @@ function ActivityTimeline({
 export default function StaffRequest(props: Props) {
     const { request, canEdit, documents, activity } = props;
     const url = '/staf/pengajuan/' + request.id;
-    const lightBadge = ['new_request', 'contacted', 'cancelled'].includes(
-        request.status,
-    );
     return (
         <StaffLayout>
             <main className="mx-auto max-w-[1440px] space-y-4 p-4 sm:p-6 xl:p-8">
@@ -630,15 +677,7 @@ export default function StaffRequest(props: Props) {
                         <h1 className="text-2xl font-semibold break-all sm:text-3xl">
                             {request.reference_code}
                         </h1>
-                        <span
-                            className={
-                                'rounded-full px-3 py-1 text-sm font-semibold ' +
-                                statusColors[request.status] +
-                                (lightBadge ? ' text-navy' : ' text-white')
-                            }
-                        >
-                            {statuses[request.status]}
-                        </span>
+                        <StatusBadge status={request.status} />
                     </div>
                     <p className="text-lg break-words text-navy/75">
                         {request.deceased_name}

@@ -1,7 +1,9 @@
 import { router, useForm } from '@inertiajs/react';
-import { ClipboardList, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import ConfirmDialog from './confirm-dialog';
+import Notice from './notice';
 import PhoneInput from './phone-input';
 import { applicantPhoneInput, validApplicantPhone } from '../lib/phone';
 import {
@@ -113,12 +115,14 @@ function SectionEditor({
     record,
     url,
     close,
+    onCancel,
     onDirty,
 }: {
     section: Section;
     record: RequestData;
     url: string;
     close: () => void;
+    onCancel: () => void;
     onDirty: (dirty: boolean) => void;
 }) {
     const form = useForm(values(section, record));
@@ -279,13 +283,15 @@ function SectionEditor({
                 )}
             </fieldset>
             {Object.keys(form.errors).length > 0 && (
-                <ul className="space-y-1 text-sm text-red-900" role="alert">
-                    {Object.entries(form.errors).map(([field, message]) => (
-                        <li key={field}>
-                            {labels[field] ?? field}: {message}
-                        </li>
-                    ))}
-                </ul>
+                <Notice tone="danger" title="Perubahan belum tersimpan">
+                    <ul className="space-y-1">
+                        {Object.entries(form.errors).map(([field, message]) => (
+                            <li key={field}>
+                                {labels[field] ?? field}: {message}
+                            </li>
+                        ))}
+                    </ul>
+                </Notice>
             )}
             <div className="flex flex-wrap gap-2">
                 <button className={buttonClass} disabled={form.processing}>
@@ -295,10 +301,7 @@ function SectionEditor({
                     type="button"
                     className={linkClass + ' min-h-11 px-3'}
                     disabled={form.processing}
-                    onClick={() => {
-                        if (!form.isDirty || window.confirm(discardMessage))
-                            close();
-                    }}
+                    onClick={onCancel}
                 >
                     Batal
                 </button>
@@ -335,6 +338,7 @@ export default function StaffRequestData({
 }) {
     const [editing, setEditing] = useState<Section | null>(null);
     const [dirty, setDirty] = useState(false);
+    const [discard, setDiscard] = useState<(() => void) | null>(null);
     const current = dateTime(record.current_local + ':00+07:00');
     const estimate = dateTime(record.applicant_estimated_burial_at);
 
@@ -395,15 +399,18 @@ export default function StaffRequestData({
         setDirty(false);
     }
 
+    // In-page switches use the dialog; the leave-page guard above must stay native.
+    function confirmDiscard(action: () => void) {
+        if (dirty) setDiscard(() => action);
+        else action();
+    }
+
     return (
         <section
             id="data-pengajuan"
             className="order-2 min-w-0 rounded-lg border border-navy/15 bg-white p-4 sm:p-5"
         >
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-                <ClipboardList className="size-5" aria-hidden="true" /> Data
-                pengajuan
-            </h2>
+            <h2 className="text-lg font-semibold">Data pengajuan</h2>
             <div className="mt-3 divide-y divide-navy/15">
                 {(Object.keys(sections) as Section[]).map((section) => (
                     <section key={section} className="space-y-3 py-4">
@@ -419,15 +426,12 @@ export default function StaffRequestData({
                                         ' inline-flex min-h-9 items-center gap-1 text-sm'
                                     }
                                     aria-label={'Ubah ' + sections[section]}
-                                    onClick={() => {
-                                        if (
-                                            !dirty ||
-                                            window.confirm(discardMessage)
-                                        ) {
+                                    onClick={() =>
+                                        confirmDiscard(() => {
                                             setDirty(false);
                                             setEditing(section);
-                                        }
-                                    }}
+                                        })
+                                    }
                                 >
                                     <Pencil
                                         className="size-4"
@@ -444,6 +448,7 @@ export default function StaffRequestData({
                                 record={record}
                                 url={url}
                                 close={close}
+                                onCancel={() => confirmDiscard(close)}
                                 onDirty={setDirty}
                             />
                         ) : (
@@ -490,6 +495,22 @@ export default function StaffRequestData({
                     value={dateTime(record.consented_at)}
                 />
             </dl>
+            {discard && (
+                <ConfirmDialog
+                    title="Buang perubahan?"
+                    confirmLabel="Buang perubahan"
+                    danger
+                    onCancel={() => setDiscard(null)}
+                    onConfirm={() => {
+                        const action = discard;
+                        setDiscard(null);
+                        action();
+                    }}
+                >
+                    Ada perubahan yang belum disimpan. Jika dilanjutkan,
+                    perubahan itu hilang.
+                </ConfirmDialog>
+            )}
         </section>
     );
 }

@@ -8,6 +8,11 @@
     --color-gold: #d1b054;
     --color-danger: #9b2c2c;
     --color-danger-soft: #fbeeee;
+    --color-warning: #8a4b00;
+    --color-warning-soft: #fff4dc;
+    --color-warning-fill: #c77700;
+    --color-success: #1f6b4a;
+    --color-success-soft: #e9f5ee;
     --font-sans:
         'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
         'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',

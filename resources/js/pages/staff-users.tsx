@@ -1,10 +1,18 @@
 import { Head, useForm } from '@inertiajs/react';
 import { Save, UserPlus } from 'lucide-react';
-import StaffLayout from '../components/staff-layout';
+import { useState } from 'react';
+import type { FormEvent } from 'react';
+import ConfirmDialog from '../components/confirm-dialog';
+import Notice from '../components/notice';
 import PasswordInput from '../components/password-input';
 import PhoneInput from '../components/phone-input';
-import { buttonClass, fieldClass } from '../lib/funeral';
-import type { FormEvent } from 'react';
+import StaffLayout from '../components/staff-layout';
+import {
+    buttonClass,
+    fieldClass,
+    roleLabels,
+    secondaryButtonClass,
+} from '../lib/funeral';
 
 type Account = {
     id: string;
@@ -19,9 +27,11 @@ const inputClass = fieldClass + ' mt-1';
 function AccountForm({
     account,
     roles,
+    onClose,
 }: {
     account?: Account;
     roles: string[];
+    onClose: () => void;
 }) {
     const form = useForm({
         name: account?.name ?? '',
@@ -30,30 +40,35 @@ function AccountForm({
         active: account?.active ?? true,
         password: '',
     });
+    const [confirming, setConfirming] = useState(false);
 
-    function submit(event: FormEvent) {
-        event.preventDefault();
-
+    function save() {
         if (account) {
             form.patch(`/staf/pengguna/${account.id}`, {
                 onFinish: () => form.reset('password'),
             });
         } else {
             form.post('/staf/pengguna', {
-                onSuccess: () => form.reset(),
+                onSuccess: onClose,
                 onError: () => form.reset('password'),
             });
         }
     }
 
+    function submit(event: FormEvent) {
+        event.preventDefault();
+        if (account?.active && !form.data.active) setConfirming(true);
+        else save();
+    }
+
     return (
         <form
             onSubmit={submit}
-            className="min-w-0 space-y-4 rounded-lg border border-navy/20 p-5"
+            className="max-w-xl min-w-0 space-y-4 rounded-lg border border-navy/20 p-5"
         >
-            <h2 className="flex items-center gap-2 border-b border-gold pb-3 font-semibold break-words">
+            <h2 className="flex items-center gap-2 font-semibold break-words">
                 {!account && <UserPlus className="size-5" aria-hidden="true" />}
-                {account ? account.name : 'Tambah akun'}
+                {account ? 'Ubah akun ' + account.name : 'Tambah akun'}
             </h2>
             {!account && (
                 <label className="block">
@@ -89,14 +104,15 @@ function AccountForm({
                 >
                     {roles.map((role) => (
                         <option key={role} value={role}>
-                            {role}
+                            {roleLabels[role] ?? role}
                         </option>
                     ))}
                 </select>
             </label>
-            <label className="flex items-center gap-2">
+            <label className="flex min-h-11 items-center gap-2">
                 <input
                     type="checkbox"
+                    className="size-5"
                     checked={form.data.active}
                     onChange={(event) =>
                         form.setData('active', event.target.checked)
@@ -120,16 +136,40 @@ function AccountForm({
                 }
             />
             {Object.values(form.errors).map((error) => (
-                <p key={error} role="alert" className="text-navy">
+                <Notice key={error} tone="danger">
                     {error}
-                </p>
+                </Notice>
             ))}
             {form.recentlySuccessful && (
-                <p role="status">Perubahan tersimpan.</p>
+                <Notice tone="success">Perubahan tersimpan.</Notice>
             )}
-            <button className={buttonClass} disabled={form.processing}>
-                <Save className="size-4" aria-hidden="true" /> Simpan
-            </button>
+            <div className="flex flex-wrap gap-2">
+                <button className={buttonClass} disabled={form.processing}>
+                    <Save className="size-4" aria-hidden="true" /> Simpan
+                </button>
+                <button
+                    type="button"
+                    className={secondaryButtonClass}
+                    onClick={onClose}
+                >
+                    {account ? 'Tutup' : 'Batal'}
+                </button>
+            </div>
+            {confirming && (
+                <ConfirmDialog
+                    title="Nonaktifkan akun ini?"
+                    confirmLabel="Ya, nonaktifkan"
+                    danger
+                    onCancel={() => setConfirming(false)}
+                    onConfirm={() => {
+                        setConfirming(false);
+                        save();
+                    }}
+                >
+                    {account?.name} tidak akan bisa masuk lagi dan semua sesi
+                    aktifnya berakhir sampai akun diaktifkan kembali.
+                </ConfirmDialog>
+            )}
         </form>
     );
 }
@@ -141,26 +181,84 @@ export default function StaffUsers({
     users: Account[];
     roles: string[];
 }) {
+    const [editing, setEditing] = useState<string | 'new' | null>(null);
     return (
         <StaffLayout>
             <main className="space-y-5 p-4 sm:p-7 xl:p-9">
                 <Head title="Pengguna" />
-                <header className="border-b border-gold pb-4">
-                    <h1 className="text-3xl font-semibold">Pengguna</h1>
-                    <p className="mt-1 text-navy/75">
-                        Kelola akun dan akses staf.
-                    </p>
+                <header className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                        <h1 className="text-3xl font-semibold">Pengguna</h1>
+                        <p className="mt-1 text-navy/75">
+                            Kelola akun dan akses staf.
+                        </p>
+                    </div>
+                    {editing !== 'new' && (
+                        <button
+                            type="button"
+                            className={buttonClass}
+                            onClick={() => setEditing('new')}
+                        >
+                            <UserPlus className="size-4" aria-hidden="true" />{' '}
+                            Tambah akun
+                        </button>
+                    )}
                 </header>
-                <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-                    <AccountForm roles={roles} />
+                {editing === 'new' && (
+                    <AccountForm
+                        roles={roles}
+                        onClose={() => setEditing(null)}
+                    />
+                )}
+                <ul className="divide-y divide-navy/15 rounded-lg border border-navy/20">
                     {users.map((account) => (
-                        <AccountForm
-                            key={account.id}
-                            account={account}
-                            roles={roles}
-                        />
+                        <li key={account.id} className="px-4 py-3">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                <div className="min-w-0 flex-1">
+                                    <p className="font-medium break-words">
+                                        {account.name}
+                                    </p>
+                                    <p className="text-sm text-navy/75">
+                                        {account.phone}
+                                    </p>
+                                </div>
+                                <p className="text-sm">
+                                    {roleLabels[account.role] ?? account.role}
+                                </p>
+                                <span
+                                    className={
+                                        'inline-flex items-center rounded-full border px-3 py-1 text-sm font-semibold ' +
+                                        (account.active
+                                            ? 'border-success/40 bg-success-soft text-success'
+                                            : 'border-navy/20 bg-[#E4E6EA] text-navy')
+                                    }
+                                >
+                                    {account.active ? 'Aktif' : 'Nonaktif'}
+                                </span>
+                                {editing !== account.id && (
+                                    <button
+                                        type="button"
+                                        className={secondaryButtonClass}
+                                        aria-label={'Ubah ' + account.name}
+                                        onClick={() => setEditing(account.id)}
+                                    >
+                                        Ubah
+                                    </button>
+                                )}
+                            </div>
+                            {editing === account.id && (
+                                <div className="mt-3">
+                                    <AccountForm
+                                        key={account.id}
+                                        account={account}
+                                        roles={roles}
+                                        onClose={() => setEditing(null)}
+                                    />
+                                </div>
+                            )}
+                        </li>
                     ))}
-                </div>
+                </ul>
             </main>
         </StaffLayout>
     );

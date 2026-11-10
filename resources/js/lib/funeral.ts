@@ -21,13 +21,45 @@ export function visitationCorrectionMessage(fields: string[]): string {
     );
 }
 
-export const statusColors: Record<string, string> = {
-    new_request: 'bg-gold',
-    contacted: 'bg-[#8FB8DC]',
-    in_progress: 'bg-[#526B9F]',
-    completed: 'bg-navy',
-    cancelled: 'bg-[#8B919D]',
+// Status is always shown with its text label; color only reinforces it.
+export const statusStyles: Record<string, { dot: string; badge: string }> = {
+    new_request: {
+        dot: 'bg-warning-fill',
+        badge: 'border-warning/50 bg-warning-soft text-warning',
+    },
+    contacted: {
+        dot: 'bg-[#8FB8DC]',
+        badge: 'border-transparent bg-[#8FB8DC] text-navy',
+    },
+    in_progress: {
+        dot: 'bg-[#526B9F]',
+        badge: 'border-transparent bg-[#526B9F] text-white',
+    },
+    completed: {
+        dot: 'bg-success',
+        badge: 'border-transparent bg-success text-white',
+    },
+    cancelled: {
+        dot: 'bg-[#8B919D]',
+        badge: 'border-navy/20 bg-[#E4E6EA] text-navy',
+    },
 };
+
+export const roleLabels: Record<string, string> = {
+    superadmin: 'Superadmin',
+    admin: 'Admin',
+    manager: 'Manager',
+    pic: 'PIC',
+};
+
+const siteLabels: Record<string, string> = {
+    karawang: 'Karawang',
+    tangerang: 'Tangerang',
+};
+
+export function siteLabel(site: string | null) {
+    return site ? (siteLabels[site] ?? site) : 'Lokasi belum ditentukan';
+}
 
 export const documentLabels: Record<string, string> = {
     contact_evidence: 'Foto bukti kontak',
@@ -50,6 +82,10 @@ export const helpWhatsApp = {
 };
 export const buttonClass =
     'inline-flex min-h-11 items-center gap-2 rounded-md bg-navy px-4 py-2 font-semibold text-white hover:bg-navy/90 disabled:opacity-60';
+export const secondaryButtonClass =
+    'inline-flex min-h-11 items-center gap-2 rounded-md border border-navy/40 px-4 py-2 font-medium hover:bg-navy/5 disabled:opacity-60';
+export const dangerButtonClass =
+    'inline-flex min-h-11 items-center gap-2 rounded-md bg-danger px-4 py-2 font-semibold text-white hover:bg-danger/90 disabled:opacity-60';
 export const linkClass =
     'font-medium text-navy underline decoration-gold underline-offset-4';
 
@@ -70,21 +106,40 @@ export function dateOnly(value: string) {
     return dateFormat.format(new Date(value + 'T00:00:00+07:00'));
 }
 
+function instant(value: string) {
+    const iso = value.includes(' ') ? value.replace(' ', 'T') : value;
+    const explicit = /(?:Z|[+-]\d\d:\d\d)$/.test(iso)
+        ? iso
+        : /[+-]\d\d$/.test(iso)
+          ? iso + ':00'
+          : iso + 'Z';
+    return new Date(explicit);
+}
+
 export function dateTime(value: string | null) {
     if (!value) return 'Belum ada data';
-    const instant = value.includes(' ') ? value.replace(' ', 'T') : value;
-    const explicit = /(?:Z|[+-]\d\d:\d\d)$/.test(instant)
-        ? instant
-        : /[+-]\d\d$/.test(instant)
-          ? instant + ':00'
-          : instant + 'Z';
-    const date = new Date(explicit);
+    const date = instant(value);
     return (
         dateFormat.format(date) +
         ', ' +
         timeFormat.format(date).replace(':', '.') +
         ' WIB'
     );
+}
+
+export function timeOnly(value: string) {
+    return timeFormat.format(instant(value)).replace(':', '.');
+}
+
+// `day` is a plain YYYY-MM-DD calendar date (no timezone conversion).
+export function longDate(day: string) {
+    return new Intl.DateTimeFormat('id-ID', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+    }).format(new Date(day + 'T00:00:00Z'));
 }
 
 export function duration(seconds: number | null) {

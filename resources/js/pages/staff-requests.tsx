@@ -1,12 +1,15 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import { ArrowUpRight, Search } from 'lucide-react';
 import type { FormEvent } from 'react';
+import Notice from '../components/notice';
 import StaffLayout from '../components/staff-layout';
+import StatusBadge from '../components/status-badge';
 import {
     buttonClass,
     dateTime,
     fieldClass,
     linkClass,
+    siteLabel,
     statuses,
 } from '../lib/funeral';
 import type { Pagination } from '../lib/funeral';
@@ -27,6 +30,8 @@ type Props = {
     handlers: { id: string; name: string }[];
 };
 
+const headerCell = 'px-4 py-2 text-sm font-semibold';
+
 export default function StaffRequests({ filters, requests, handlers }: Props) {
     const form = useForm({
         q: filters.q ?? '',
@@ -45,7 +50,7 @@ export default function StaffRequests({ filters, requests, handlers }: Props) {
         <StaffLayout>
             <main className="space-y-5 p-4 sm:p-7 xl:p-9">
                 <Head title="Pengajuan" />
-                <header className="border-b border-gold pb-4">
+                <header>
                     <h1 className="text-3xl font-semibold">Pengajuan</h1>
                     <p className="mt-1 text-navy/75">
                         Cari pengajuan dan buka detail untuk menindaklanjuti.
@@ -53,7 +58,7 @@ export default function StaffRequests({ filters, requests, handlers }: Props) {
                 </header>
                 <form
                     onSubmit={filter}
-                    className="grid gap-3 rounded-lg border border-navy/20 p-4 sm:grid-cols-2 xl:grid-cols-4"
+                    className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
                 >
                     <label className="text-sm font-medium">
                         Cari referensi atau nama
@@ -131,9 +136,9 @@ export default function StaffRequests({ filters, requests, handlers }: Props) {
                         </Link>
                     </div>
                     {Object.values(form.errors).length > 0 && (
-                        <p role="alert" className="sm:col-span-full">
+                        <Notice tone="danger" className="sm:col-span-full">
                             {Object.values(form.errors).join(' ')}
-                        </p>
+                        </Notice>
                     )}
                 </form>
                 {!requests.data.length ? (
@@ -141,49 +146,74 @@ export default function StaffRequests({ filters, requests, handlers }: Props) {
                         Tidak ada pengajuan yang cocok.
                     </p>
                 ) : (
-                    <ul className="divide-y divide-navy/15 rounded-lg border border-navy/20">
-                        {requests.data.map((row) => (
-                            <li
-                                key={row.id}
-                                className="grid gap-2 px-4 py-3 text-sm md:grid-cols-3"
-                            >
-                                <div className="min-w-0">
-                                    <Link
-                                        className={
-                                            linkClass +
-                                            ' inline-flex items-center gap-1'
-                                        }
-                                        href={'/staf/pengajuan/' + row.id}
+                    <div className="overflow-hidden rounded-lg border border-navy/20">
+                        <table className="w-full text-left text-sm">
+                            <caption className="sr-only">
+                                Daftar pengajuan
+                            </caption>
+                            <thead className="hidden border-b border-navy/20 bg-navy/5 md:table-header-group">
+                                <tr>
+                                    <th scope="col" className={headerCell}>
+                                        Pengajuan
+                                    </th>
+                                    <th scope="col" className={headerCell}>
+                                        Status
+                                    </th>
+                                    <th scope="col" className={headerCell}>
+                                        Penanggung jawab
+                                    </th>
+                                    <th scope="col" className={headerCell}>
+                                        Masuk dan lokasi
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="block divide-y divide-navy/15 md:table-row-group">
+                                {requests.data.map((row) => (
+                                    <tr
+                                        key={row.id}
+                                        className="relative grid gap-1.5 px-4 py-3 hover:bg-navy/5 md:table-row md:px-0 md:py-0"
                                     >
-                                        {row.reference_code}
-                                        <ArrowUpRight
-                                            className="size-4"
-                                            aria-hidden="true"
-                                        />
-                                    </Link>
-                                    <p className="break-words">
-                                        {row.deceased_name}
-                                    </p>
-                                </div>
-                                <div className="min-w-0">
-                                    <p className="font-medium">
-                                        {statuses[row.status]}
-                                    </p>
-                                    <p className="break-words">
-                                        {row.handler_name ??
-                                            'Belum ada penanggung jawab'}
-                                    </p>
-                                </div>
-                                <div>
-                                    <p>{dateTime(row.submitted_at)}</p>
-                                    <p className="text-navy/75">
-                                        {row.burial_site ??
-                                            'Lokasi belum ditentukan'}
-                                    </p>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
+                                        <td className="min-w-0 md:px-4 md:py-3">
+                                            <Link
+                                                className={
+                                                    linkClass +
+                                                    ' inline-flex items-center gap-1 after:absolute after:inset-0'
+                                                }
+                                                href={
+                                                    '/staf/pengajuan/' + row.id
+                                                }
+                                            >
+                                                {row.reference_code}
+                                                <ArrowUpRight
+                                                    className="size-4"
+                                                    aria-hidden="true"
+                                                />
+                                            </Link>
+                                            <p className="break-words">
+                                                {row.deceased_name}
+                                            </p>
+                                        </td>
+                                        <td className="md:px-4 md:py-3">
+                                            <StatusBadge status={row.status} />
+                                        </td>
+                                        <td className="min-w-0 break-words md:px-4 md:py-3">
+                                            {row.handler_name ?? (
+                                                <span className="text-navy/75">
+                                                    Belum ada penanggung jawab
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="md:px-4 md:py-3">
+                                            <p>{dateTime(row.submitted_at)}</p>
+                                            <p className="text-navy/75">
+                                                {siteLabel(row.burial_site)}
+                                            </p>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
                 <nav
                     className="flex flex-wrap items-center gap-3 text-sm"

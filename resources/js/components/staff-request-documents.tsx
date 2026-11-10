@@ -234,7 +234,15 @@ function DocumentRow({
                             <div className="min-w-0 flex-1 text-sm break-all">
                                 <p>{document.original_file_name}</p>
                                 {!accepted && (
-                                    <p className="text-xs text-navy/70">
+                                    <p
+                                        className={
+                                            'text-xs font-medium ' +
+                                            (document.validation_state ===
+                                            'pending'
+                                                ? 'text-warning'
+                                                : 'text-danger')
+                                        }
+                                    >
                                         {document.validation_state === 'pending'
                                             ? 'Menunggu pemeriksaan'
                                             : 'Ditolak'}
@@ -286,7 +294,10 @@ function DocumentRow({
                         }}
                     />
                     {Object.values(form.errors).length > 0 && (
-                        <p role="alert" className="text-sm text-red-900">
+                        <p
+                            role="alert"
+                            className="text-sm font-medium text-danger"
+                        >
                             {Object.values(form.errors).join(' ')}
                         </p>
                     )}
@@ -332,9 +343,7 @@ export default function StaffRequestDocuments({
             id="dokumen"
             className="order-3 min-w-0 rounded-lg border border-navy/15 bg-white p-4 sm:p-5"
         >
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-                <FileText className="size-5" aria-hidden="true" /> Dokumen
-            </h2>
+            <h2 className="text-lg font-semibold">Dokumen</h2>
             <ul className="mt-2 divide-y divide-navy/15">
                 {Object.keys(documentLabels).map((type) => {
                     const items = documents.filter(

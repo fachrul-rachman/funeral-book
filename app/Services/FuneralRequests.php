@@ -507,7 +507,7 @@ class FuneralRequests
         $disk = config('funeral.document_disk');
         abort_if(app()->isProduction() && $disk !== 's3', 503, 'Penyimpanan privat belum dikonfigurasi.');
         abort_if($disk === 'public', 503);
-        $key = 'funeral-documents/'.Str::uuid();
+        $key = 'funeral-documents/'.$id.'/'.Str::uuid();
         $document = [
             'id' => (string) Str::uuid(), 'funeral_request_id' => $id, 'type' => $type,
             'storage_disk' => $disk, 'object_key' => $key, 'original_file_name' => Str::limit($file->getClientOriginalName(), 255, ''),
@@ -526,7 +526,7 @@ class FuneralRequests
                     'ContentType' => $inspection['mime'],
                 ]);
             } else {
-                abort_if($storage->putFileAs('funeral-documents', $file, basename($key), 'private') === false, 503, 'Penyimpanan dokumen gagal.');
+                abort_if($storage->putFileAs(dirname($key), $file, basename($key), 'private') === false, 503, 'Penyimpanan dokumen gagal.');
             }
         } catch (Throwable $error) {
             $this->discard([$document]);

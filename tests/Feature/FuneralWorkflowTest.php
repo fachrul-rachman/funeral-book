@@ -2,12 +2,17 @@
 
 use App\Models\User;
 use App\Services\FuneralRequests;
+use Aws\Result;
+use Aws\S3\S3Client;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Filesystem\AwsS3V3Adapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -42,6 +47,98 @@ function contactPhoto(): UploadedFile
 {
     return UploadedFile::fake()->createWithContent('bukti.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRzQAAAAASUVORK5CYII='));
 }
+
+test('submission documents, contact evidence and replacements stay in their own request directory', function () {
+    $service = app(FuneralRequests::class);
+    $reference = $service->submit(funeralInput(), ['deceased_ktp' => contactPhoto()]);
+    $id = DB::table('funeral_requests')->where('reference_code', $reference)->value('id');
+    $otherReference = $service->submit(funeralInput(), ['deceased_ktp' => contactPhoto()]);
+    $otherId = DB::table('funeral_requests')->where('reference_code', $otherReference)->value('id');
+    $pic = User::factory()->create(['active' => true]);
+    $service->transition($pic, $id, 'new_request', 'contacted', contactPhoto());
+    $service->attach($pic, $id, 'deceased_ktp', contactPhoto());
+
+    $documents = DB::table('request_documents')->get();
+    expect($documents)->toHaveCount(4);
+    foreach ($documents as $document) {
+        expect(dirname($document->object_key))->toBe('funeral-documents/'.$document->funeral_request_id);
+        expect(Str::isUuid(basename($document->object_key)))->toBeTrue();
+        Storage::disk('local')->assertExists($document->object_key);
+    }
+    expect(Storage::disk('local')->allFiles('funeral-documents/'.$id))->toHaveCount(3);
+    expect(Storage::disk('local')->allFiles('funeral-documents/'.$otherId))->toHaveCount(1);
+    expect($documents->pluck('object_key')->unique())->toHaveCount(4);
+});
+
+test('legacy flat document keys remain readable and replacements use the request directory', function () {
+    $service = app(FuneralRequests::class);
+    $id = submitFuneral();
+    $pic = User::factory()->create(['active' => true]);
+    $service->transition($pic, $id, 'new_request', 'contacted', contactPhoto());
+    $service->attach($pic, $id, 'deceased_ktp', contactPhoto());
+    $document = DB::table('request_documents')->where('type', 'deceased_ktp')->first();
+    $legacyKey = 'funeral-documents/'.Str::uuid();
+    Storage::disk('local')->move($document->object_key, $legacyKey);
+    DB::table('request_documents')->where('id', $document->id)->update(['object_key' => $legacyKey]);
+
+    $download = $service->openDocument($pic, $id, $document->id);
+    expect(stream_get_contents($download['stream']))->toBe(contactPhoto()->getContent());
+    fclose($download['stream']);
+    $service->attach($pic, $id, 'deceased_ktp', contactPhoto());
+    $replacement = DB::table('request_documents')->where('type', 'deceased_ktp')->whereNull('superseded_at')->first();
+    expect(dirname($replacement->object_key))->toBe('funeral-documents/'.$id);
+    expect(DB::table('request_documents')->where('id', $document->id)->value('superseded_at'))->not->toBeNull();
+    Storage::disk('local')->assertExists([$legacyKey, $replacement->object_key]);
+});
+
+test('R2 receives the same request scoped key recorded in document metadata without an object ACL', function () {
+    config(['funeral.document_disk' => 's3', 'filesystems.disks.s3.bucket' => 'private-test-bucket']);
+    $uploadedKey = null;
+    $client = Mockery::mock(S3Client::class);
+    $client->shouldReceive('putObject')->once()->withArgs(function (array $options) use (&$uploadedKey): bool {
+        $uploadedKey = $options['Key'];
+        expect($options['Bucket'])->toBe('private-test-bucket');
+        expect($options['Key'])->toMatch('/^funeral-documents\/[a-f0-9-]{36}\/[a-f0-9-]{36}$/D');
+        expect($options)->not->toHaveKey('ACL');
+        expect(file_exists($options['SourceFile']))->toBeTrue();
+
+        return true;
+    })->andReturn(new Result);
+    $disk = Mockery::mock(AwsS3V3Adapter::class);
+    $disk->shouldReceive('getClient')->once()->andReturn($client);
+    Storage::shouldReceive('disk')->with('s3')->once()->andReturn($disk);
+
+    $reference = app(FuneralRequests::class)->submit(funeralInput(), ['deceased_ktp' => contactPhoto()]);
+    $id = DB::table('funeral_requests')->where('reference_code', $reference)->value('id');
+    $document = DB::table('request_documents')->where('funeral_request_id', $id)->first();
+    expect($document->object_key)->toBe($uploadedKey);
+    expect(dirname($document->object_key))->toBe('funeral-documents/'.$id);
+});
+
+test('scheduled cleanup removes only stale unreferenced files in both flat and nested directories', function () {
+    $service = app(FuneralRequests::class);
+    $reference = $service->submit(funeralInput(), ['deceased_ktp' => contactPhoto(), 'hospital_death_certificate' => contactPhoto()]);
+    $id = DB::table('funeral_requests')->where('reference_code', $reference)->value('id');
+    $documents = DB::table('request_documents')->where('funeral_request_id', $id)->get();
+    $legacyKey = 'funeral-documents/'.Str::uuid();
+    $disk = Storage::disk('local');
+    $disk->move($documents[0]->object_key, $legacyKey);
+    DB::table('request_documents')->where('id', $documents[0]->id)->update(['object_key' => $legacyKey]);
+    $orphans = ['funeral-documents/orphan', 'funeral-documents/'.$id.'/orphan'];
+    foreach ($orphans as $key) {
+        $disk->put($key, 'orphan');
+    }
+    foreach ([$legacyKey, $documents[1]->object_key, ...$orphans] as $key) {
+        touch($disk->path($key), now()->subDays(2)->timestamp);
+    }
+    $recentKey = 'funeral-documents/'.$id.'/recent';
+    $disk->put($recentKey, 'recent');
+
+    collect(Schedule::events())->firstWhere('description', 'clean-unreferenced-funeral-documents')->run(app());
+
+    $disk->assertMissing($orphans);
+    $disk->assertExists([$legacyKey, $documents[1]->object_key, $recentKey]);
+});
 
 test('claim and advance reject stale statuses without duplicate evidence or intents', function () {
     $service = app(FuneralRequests::class);

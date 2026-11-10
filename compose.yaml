@@ -1,0 +1,62 @@
+name: funeral-book
+
+x-php: &php
+    image: funeral-book-php:latest
+    pull_policy: never
+    env_file:
+        - .env
+    environment:
+        DB_HOST: ${DOCKER_DB_HOST:-${DB_HOST:-host.docker.internal}}
+        TRUSTED_PROXIES: '*'
+    volumes:
+        - funeral-book-storage:/var/www/html/storage
+    networks:
+        - funeral-book
+    restart: unless-stopped
+
+services:
+    app:
+        <<: *php
+        container_name: funeral-book-app
+        build:
+            context: .
+            target: app
+
+    web:
+        image: funeral-book-web:latest
+        container_name: funeral-book-web
+        build:
+            context: .
+            target: web
+        ports:
+            - '127.0.0.1:${DOCKER_HTTP_PORT:-8088}:80'
+        networks:
+            - funeral-book
+        depends_on:
+            - app
+        restart: unless-stopped
+
+    worker:
+        <<: *php
+        container_name: funeral-book-worker
+        command: ['php', 'artisan', 'queue:work', 'database', '--queue=whatsapp', '--sleep=3', '--tries=1', '--timeout=60', '--max-time=3600']
+        depends_on:
+            - app
+        stop_grace_period: 90s
+
+    scheduler:
+        <<: *php
+        container_name: funeral-book-scheduler
+        command: ['php', 'artisan', 'schedule:work', '--no-interaction']
+        depends_on:
+            - app
+        stop_grace_period: 90s
+
+networks:
+    funeral-book:
+        name: funeral-book-network
+
+volumes:
+    funeral-book-storage:
+        name: funeral-book-storage
+

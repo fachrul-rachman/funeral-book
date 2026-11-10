@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'trusted_proxies' => array_values(array_filter(explode(',', (string) env('TRUSTED_PROXIES', '')))),
     'document_disk' => env('FUNERAL_DOCUMENT_DISK', 'local'),
     'pdf_scanner' => env('FUNERAL_PDF_SCANNER'),
     'privacy_url' => env('FUNERAL_PRIVACY_URL'),

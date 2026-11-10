@@ -1,13 +1,18 @@
 import { Eye, EyeOff } from 'lucide-react';
 import { useId, useState } from 'react';
 import type { ComponentPropsWithoutRef } from 'react';
-import { fieldClass } from '../lib/funeral';
+import { fieldClass, invalidFieldClass } from '../lib/funeral';
 
 type Props = Omit<ComponentPropsWithoutRef<'input'>, 'type'> & {
     label: string;
+    invalid?: boolean;
 };
 
-export default function PasswordInput({ label, ...input }: Props) {
+export default function PasswordInput({
+    label,
+    invalid = false,
+    ...input
+}: Props) {
     const [visible, setVisible] = useState(false);
     const id = useId();
 
@@ -21,7 +26,10 @@ export default function PasswordInput({ label, ...input }: Props) {
                     {...input}
                     id={id}
                     type={visible ? 'text' : 'password'}
-                    className={fieldClass + ' pr-14'}
+                    aria-invalid={invalid || undefined}
+                    className={
+                        (invalid ? invalidFieldClass : fieldClass) + ' pr-14'
+                    }
                 />
                 <button
                     type="button"

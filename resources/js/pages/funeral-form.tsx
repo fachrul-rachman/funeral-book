@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
+import FieldError from '../components/field-error';
 import {
     buttonClass,
     fieldClass,
@@ -164,21 +165,6 @@ function newSubmissionKey() {
     ].join('-');
 }
 
-function ErrorText({ id, children }: { id?: string; children: ReactNode }) {
-    return (
-        <p
-            id={id}
-            className="mt-1.5 flex items-start gap-1.5 text-sm font-medium text-danger"
-        >
-            <CircleAlert
-                className="mt-0.5 size-4 shrink-0"
-                aria-hidden="true"
-            />
-            <span>{children}</span>
-        </p>
-    );
-}
-
 function Field({
     name,
     label,
@@ -226,7 +212,7 @@ function Field({
                 'aria-invalid': error ? true : undefined,
                 'aria-describedby': describedBy,
             })}
-            {error && <ErrorText id={id + '-error'}>{error}</ErrorText>}
+            {error && <FieldError id={id + '-error'}>{error}</FieldError>}
         </div>
     );
 }
@@ -1158,12 +1144,12 @@ export default function FuneralForm({
                                                 </label>
                                                 {form.errors
                                                     .consent_accepted && (
-                                                    <ErrorText id="consent-error">
+                                                    <FieldError id="consent-error">
                                                         {
                                                             form.errors
                                                                 .consent_accepted
                                                         }
-                                                    </ErrorText>
+                                                    </FieldError>
                                                 )}
                                             </div>
                                             {privacyUrl && (
@@ -1207,9 +1193,9 @@ export default function FuneralForm({
                                                     tabIndex={-1}
                                                     role="alert"
                                                 >
-                                                    <ErrorText>
+                                                    <FieldError>
                                                         {challengeError}
-                                                    </ErrorText>
+                                                    </FieldError>
                                                 </div>
                                             )}
                                         </section>

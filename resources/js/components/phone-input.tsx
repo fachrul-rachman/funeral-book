@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef } from 'react';
-import { fieldClass } from '../lib/funeral';
+import { fieldClass, invalidFieldClass } from '../lib/funeral';
 import { phoneCharacters, validPhone } from '../lib/phone';
 
 type Props = Omit<
@@ -9,18 +9,21 @@ type Props = Omit<
     value: string;
     onValueChange: (value: string) => void;
     validatePhone?: (value: string) => boolean;
+    invalid?: boolean;
 };
 
 export default function PhoneInput({
     value,
     onValueChange,
     validatePhone = validPhone,
+    invalid = false,
     ...input
 }: Props) {
     return (
         <input
             {...input}
-            className={fieldClass}
+            aria-invalid={invalid || undefined}
+            className={invalid ? invalidFieldClass : fieldClass}
             type="tel"
             inputMode="tel"
             maxLength={40}

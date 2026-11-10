@@ -1,18 +1,25 @@
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, useForm } from '@inertiajs/react';
 import {
     ArrowLeft,
     ArrowRight,
     Check,
+    CircleAlert,
     CircleCheck,
+    Copy,
     FileText,
-    LogIn,
     Send,
     Upload,
     X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
-import { buttonClass, fieldClass, linkClass } from '../lib/funeral';
+import type { FormEvent, ReactNode } from 'react';
+import {
+    buttonClass,
+    fieldClass,
+    helpWhatsApp,
+    invalidFieldClass,
+    linkClass,
+} from '../lib/funeral';
 import { phoneCharacters, validApplicantPhone } from '../lib/phone';
 
 type Receipt = { reference_code: string; message: string };
@@ -30,13 +37,20 @@ type Turnstile = {
     remove: (id: string) => void;
     reset: (id: string) => void;
 };
+type Aria = {
+    id: string;
+    className: string;
+    'aria-invalid'?: true;
+    'aria-describedby'?: string;
+};
 
 const labels = [
-    'Data pemohon',
-    'Data almarhum/almarhumah',
-    'Informasi pemakaman',
+    'Tentang Anda',
+    'Tentang almarhum/almarhumah',
+    'Rencana pemakaman',
     'Dokumen dan persetujuan',
 ];
+const shortLabels = ['Anda', 'Almarhum', 'Pemakaman', 'Dokumen'];
 const documentLabels = {
     ownership_certificate: 'Sertifikat kepemilikan makam',
     plot_owner_ktp: 'KTP pemilik makam',
@@ -44,7 +58,6 @@ const documentLabels = {
     hospital_death_certificate: 'Surat kematian dari rumah sakit',
     embassy_death_certificate: 'Surat kematian dari kedutaan (untuk WNA)',
 };
-const shortLabels = ['Pemohon', 'Almarhum', 'Makam', 'Dokumen'];
 const relationships = [
     'Orang tua',
     'Suami/Istri',
@@ -53,8 +66,83 @@ const relationships = [
     'Teman',
     'Lainnya',
 ];
-const formFieldClass = fieldClass + ' mt-1.5 h-11 text-base font-normal';
-const formLabelClass = 'block min-w-0 text-sm font-medium';
+const text = {
+    applicant_name: '',
+    applicant_whatsapp: '',
+    relationship_to_deceased: '',
+    relationship_other: '',
+    deceased_name: '',
+    deceased_date_of_death: '',
+    funeral_home_location: '',
+    has_plot: '',
+    burial_site: '',
+    zone: '',
+    lot_number: '',
+    paid_in_full: '',
+    estimated_burial_date: '',
+    estimated_burial_time: '',
+    website: '',
+};
+const initial = {
+    ...text,
+    consent_accepted: false,
+    documents: {} as Partial<Record<keyof typeof documentLabels, File>>,
+};
+type Name = keyof typeof text;
+type AnyName = keyof typeof initial;
+type Errors = Partial<Record<AnyName, string>>;
+
+// Fields rendered inline on each step. Other server errors go to the summary.
+const stepFields: string[][] = [
+    ['applicant_name', 'applicant_whatsapp', 'relationship_to_deceased'],
+    ['deceased_name', 'deceased_date_of_death', 'funeral_home_location'],
+    [
+        'has_plot',
+        'burial_site',
+        'zone',
+        'lot_number',
+        'paid_in_full',
+        'estimated_burial_date',
+        'estimated_burial_time',
+    ],
+    ['consent_accepted'],
+];
+const draftKey = 'funeral-form-draft';
+const draftNames = (Object.keys(text) as Name[]).filter(
+    (name) => name !== 'website',
+);
+const controlClass = (invalid: boolean) =>
+    (invalid ? invalidFieldClass : fieldClass) +
+    ' mt-1.5 h-11 text-base font-normal';
+
+// Draft lives in sessionStorage only: it is cleared when the tab closes.
+// Files, consent and the security token are never stored.
+function loadDraft(): { step: number; data: Partial<typeof text> } | null {
+    try {
+        const saved = JSON.parse(sessionStorage.getItem(draftKey) ?? 'null');
+        if (!saved || typeof saved !== 'object') return null;
+        const data: Partial<typeof text> = {};
+        for (const name of draftNames)
+            if (typeof saved.data?.[name] === 'string')
+                data[name] = saved.data[name];
+        const step = Number.isInteger(saved.step)
+            ? Math.min(Math.max(saved.step, 0), 3)
+            : 0;
+        return step === 0 && !Object.values(data).some(Boolean)
+            ? null
+            : { step, data };
+    } catch {
+        return null;
+    }
+}
+
+function clearDraft() {
+    try {
+        sessionStorage.removeItem(draftKey);
+    } catch {
+        // Storage can be blocked; the form still works without it.
+    }
+}
 
 function turnstile() {
     return (window as Window & { turnstile?: Turnstile }).turnstile;
@@ -76,13 +164,127 @@ function newSubmissionKey() {
     ].join('-');
 }
 
+function ErrorText({ id, children }: { id?: string; children: ReactNode }) {
+    return (
+        <p
+            id={id}
+            className="mt-1.5 flex items-start gap-1.5 text-sm font-medium text-danger"
+        >
+            <CircleAlert
+                className="mt-0.5 size-4 shrink-0"
+                aria-hidden="true"
+            />
+            <span>{children}</span>
+        </p>
+    );
+}
+
+function Field({
+    name,
+    label,
+    required,
+    optional,
+    hint,
+    error,
+    className = '',
+    children,
+}: {
+    name: string;
+    label: string;
+    required?: boolean;
+    optional?: boolean;
+    hint?: string;
+    error?: string;
+    className?: string;
+    children: (aria: Aria) => ReactNode;
+}) {
+    const id = 'field-' + name;
+    const describedBy =
+        [hint && id + '-hint', error && id + '-error']
+            .filter(Boolean)
+            .join(' ') || undefined;
+    return (
+        <div className={'min-w-0 ' + className}>
+            <label htmlFor={id} className="block text-base font-medium">
+                {label}
+                {required && <span aria-hidden="true"> *</span>}
+                {optional && (
+                    <span className="font-normal text-navy/75">
+                        {' '}
+                        (opsional)
+                    </span>
+                )}
+            </label>
+            {hint && (
+                <p id={id + '-hint'} className="mt-0.5 text-sm text-navy/75">
+                    {hint}
+                </p>
+            )}
+            {children({
+                id,
+                className: controlClass(!!error),
+                'aria-invalid': error ? true : undefined,
+                'aria-describedby': describedBy,
+            })}
+            {error && <ErrorText id={id + '-error'}>{error}</ErrorText>}
+        </div>
+    );
+}
+
+function ReceiptCard({ receipt }: { receipt: Receipt }) {
+    const [copied, setCopied] = useState(false);
+    async function copy() {
+        try {
+            await navigator.clipboard.writeText(receipt.reference_code);
+            setCopied(true);
+        } catch {
+            setCopied(false);
+        }
+    }
+    return (
+        <div
+            role="status"
+            className="space-y-4 rounded-lg border border-gold p-5"
+        >
+            <CircleCheck className="size-8" aria-hidden="true" />
+            <h2 className="text-xl font-semibold">Pengajuan diterima</h2>
+            <p>{receipt.message}</p>
+            <div>
+                <p className="text-sm text-navy/75">Nomor referensi</p>
+                <p className="text-lg font-semibold break-all">
+                    {receipt.reference_code}
+                </p>
+                {typeof navigator !== 'undefined' && navigator.clipboard && (
+                    <button
+                        type="button"
+                        onClick={copy}
+                        className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-md border border-navy/40 px-3 text-sm font-medium"
+                    >
+                        {copied ? (
+                            <Check className="size-4" aria-hidden="true" />
+                        ) : (
+                            <Copy className="size-4" aria-hidden="true" />
+                        )}
+                        {copied ? 'Nomor tersalin' : 'Salin nomor'}
+                    </button>
+                )}
+            </div>
+            <a href="/" className={linkClass}>
+                Buat pengajuan baru
+            </a>
+        </div>
+    );
+}
+
 export default function FuneralForm({
     siteKey,
     privacyUrl,
     consentText,
     receipt,
 }: Props) {
-    const [step, setStep] = useState(0);
+    const [draft] = useState(() => (receipt ? null : loadDraft()));
+    const [restored, setRestored] = useState(draft !== null);
+    const [step, setStep] = useState(draft?.step ?? 0);
     const [challengeError, setChallengeError] = useState('');
     const [networkError, setNetworkError] = useState('');
     const [token, setToken] = useState('');
@@ -91,25 +293,27 @@ export default function FuneralForm({
     const widget = useRef<HTMLDivElement>(null);
     const widgetId = useRef<string | null>(null);
     const key = useRef<string | null>(null);
-    const form = useForm({
-        applicant_name: '',
-        applicant_whatsapp: '',
-        relationship_to_deceased: '',
-        relationship_other: '',
-        deceased_name: '',
-        deceased_date_of_death: '',
-        funeral_home_location: '',
-        has_plot: '',
-        burial_site: '',
-        zone: '',
-        lot_number: '',
-        paid_in_full: '',
-        estimated_burial_date: '',
-        estimated_burial_time: '',
-        consent_accepted: false,
-        website: '',
-        documents: {} as Partial<Record<keyof typeof documentLabels, File>>,
-    });
+    const form = useForm({ ...initial, ...draft?.data });
+
+    useEffect(() => {
+        if (receipt) {
+            clearDraft();
+            return;
+        }
+        try {
+            sessionStorage.setItem(
+                draftKey,
+                JSON.stringify({
+                    step,
+                    data: Object.fromEntries(
+                        draftNames.map((name) => [name, form.data[name]]),
+                    ),
+                }),
+            );
+        } catch {
+            // Storage can be blocked; the form still works without it.
+        }
+    }, [form.data, step, receipt]);
 
     useEffect(() => {
         if (step !== 3 || !siteKey || receipt) return;
@@ -164,6 +368,7 @@ export default function FuneralForm({
         value: (typeof form.data)[K],
     ) {
         key.current = null;
+        form.clearErrors(field);
         form.setData((previous) => ({ ...previous, [field]: value }));
     }
 
@@ -173,44 +378,86 @@ export default function FuneralForm({
         requestAnimationFrame(() => heading.current?.focus());
     }
 
+    function startOver() {
+        clearDraft();
+        key.current = null;
+        form.setData({ ...initial });
+        form.clearErrors();
+        setRestored(false);
+        move(0);
+    }
+
+    function validate(current: number): Errors {
+        const data = form.data;
+        const found: Errors = {};
+        const blank = (name: Name) => !data[name].trim();
+        if (current === 0) {
+            if (blank('applicant_name'))
+                found.applicant_name = 'Isi nama lengkap Anda.';
+            if (blank('applicant_whatsapp'))
+                found.applicant_whatsapp = 'Isi nomor WhatsApp Anda.';
+            else if (!validApplicantPhone(data.applicant_whatsapp))
+                found.applicant_whatsapp =
+                    'Gunakan nomor WhatsApp Indonesia berawalan 08, 62, atau +62 dengan 10 sampai 13 digit angka.';
+            if (blank('relationship_to_deceased'))
+                found.relationship_to_deceased =
+                    'Pilih hubungan Anda dengan almarhum/almarhumah.';
+            else if (
+                data.relationship_to_deceased === 'Lainnya' &&
+                blank('relationship_other')
+            )
+                found.relationship_other = 'Tuliskan hubungan Anda.';
+        }
+        if (current === 1) {
+            if (blank('deceased_name'))
+                found.deceased_name = 'Isi nama lengkap almarhum/almarhumah.';
+            if (blank('deceased_date_of_death'))
+                found.deceased_date_of_death = 'Isi tanggal meninggal.';
+            if (blank('funeral_home_location'))
+                found.funeral_home_location = 'Isi lokasi rumah duka.';
+        }
+        if (current === 2) {
+            if (blank('has_plot')) found.has_plot = 'Pilih salah satu jawaban.';
+            if (blank('estimated_burial_date'))
+                found.estimated_burial_date =
+                    'Isi perkiraan tanggal pemakaman.';
+            else if (data.estimated_burial_date < data.deceased_date_of_death)
+                found.estimated_burial_date =
+                    'Tanggal pemakaman tidak boleh sebelum tanggal meninggal.';
+            if (blank('estimated_burial_time'))
+                found.estimated_burial_time = 'Isi perkiraan waktu pemakaman.';
+            else if (!found.estimated_burial_date) {
+                const estimate = Date.parse(
+                    data.estimated_burial_date +
+                        'T' +
+                        data.estimated_burial_time +
+                        ':00+07:00',
+                );
+                if (!Number.isFinite(estimate) || estimate <= Date.now())
+                    found.estimated_burial_time =
+                        'Pilih waktu pemakaman yang masih akan datang dalam WIB.';
+            }
+        }
+        if (current === 3 && !data.consent_accepted)
+            found.consent_accepted =
+                'Centang persetujuan untuk melanjutkan pengajuan.';
+        return found;
+    }
+
     function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        if (step === 0) {
-            if (!validApplicantPhone(form.data.applicant_whatsapp)) {
-                form.setError(
-                    'applicant_whatsapp',
-                    'Gunakan nomor WhatsApp Indonesia berawalan 08, 62, atau +62 dengan 10 sampai 13 digit angka.',
-                );
-                event.currentTarget
-                    .querySelector<HTMLInputElement>(
-                        '[name="applicant_whatsapp"]',
-                    )
-                    ?.focus();
-                return;
-            }
-            form.clearErrors('applicant_whatsapp');
-        }
-        if (step === 2) {
-            const estimate = Date.parse(
-                form.data.estimated_burial_date +
-                    'T' +
-                    form.data.estimated_burial_time +
-                    ':00+07:00',
+        const formElement = event.currentTarget;
+        const found = validate(step);
+        if (Object.keys(found).length > 0) {
+            form.setError(found as Record<AnyName, string>);
+            requestAnimationFrame(() =>
+                formElement
+                    .querySelector<HTMLElement>('[aria-invalid="true"]')
+                    ?.focus(),
             );
-            if (!Number.isFinite(estimate) || estimate <= Date.now()) {
-                form.setError(
-                    'estimated_burial_time',
-                    'Pilih waktu pemakaman yang masih akan datang dalam WIB.',
-                );
-                event.currentTarget
-                    .querySelector<HTMLInputElement>(
-                        '[name="estimated_burial_time"]',
-                    )
-                    ?.focus();
-                return;
-            }
-            form.clearErrors('estimated_burial_time');
+            return;
         }
+        form.clearErrors();
         if (step < 3) {
             move(step + 1);
             return;
@@ -247,7 +494,15 @@ export default function FuneralForm({
         form.post('/pengajuan', {
             forceFormData: true,
             preserveScroll: true,
-            onError: () => requestAnimationFrame(() => errors.current?.focus()),
+            onError: (serverErrors) => {
+                const first = stepFields
+                    .slice(0, 3)
+                    .findIndex((names) =>
+                        names.some((name) => name in serverErrors),
+                    );
+                if (first !== -1) move(first);
+                else requestAnimationFrame(() => errors.current?.focus());
+            },
             onNetworkError: () => {
                 setNetworkError(
                     'Koneksi terputus. Kirim ulang untuk memeriksa apakah pengajuan sudah diterima.',
@@ -269,112 +524,152 @@ export default function FuneralForm({
         return true;
     }
 
+    function errorFor(name: Name) {
+        if (name === 'relationship_other')
+            return (
+                form.errors.relationship_other ??
+                (form.data.relationship_to_deceased === 'Lainnya'
+                    ? form.errors.relationship_to_deceased
+                    : undefined)
+            );
+        if (
+            name === 'relationship_to_deceased' &&
+            form.data.relationship_to_deceased === 'Lainnya'
+        )
+            return undefined;
+        return form.errors[name];
+    }
+
     function input(
-        field: Exclude<
-            keyof typeof form.data,
-            'documents' | 'consent_accepted'
-        >,
+        name: Name,
         label: string,
         type = 'text',
-        required = true,
+        options: { optional?: boolean; hint?: string; className?: string } = {},
     ) {
-        const isPhone = field === 'applicant_whatsapp';
+        const isPhone = name === 'applicant_whatsapp';
         return (
-            <label className={formLabelClass}>
-                {label}
-                {required && <span aria-hidden="true"> *</span>}
-                <input
-                    className={formFieldClass}
-                    type={type}
-                    required={required}
-                    name={field}
-                    pattern={
-                        field === 'relationship_other'
-                            ? String.raw`.*\S.*`
-                            : undefined
-                    }
-                    autoComplete={isPhone ? 'tel' : undefined}
-                    maxLength={
-                        isPhone
-                            ? 40
-                            : field === 'relationship_other'
-                              ? 100
-                              : 255
-                    }
-                    min={
-                        field === 'estimated_burial_date'
-                            ? form.data.deceased_date_of_death
-                            : undefined
-                    }
-                    aria-invalid={isPhone && !!form.errors.applicant_whatsapp}
-                    aria-describedby={
-                        isPhone && form.errors.applicant_whatsapp
-                            ? 'applicant-phone-error'
-                            : undefined
-                    }
-                    value={form.data[field]}
-                    onChange={(event) => {
-                        const value = event.target.value;
-                        if (isPhone) {
-                            if (!phoneCharacters(value)) {
+            <Field
+                name={name}
+                label={label}
+                required={!options.optional}
+                optional={options.optional}
+                hint={options.hint}
+                error={errorFor(name)}
+                className={options.className}
+            >
+                {(aria) => (
+                    <input
+                        {...aria}
+                        type={type}
+                        required={!options.optional}
+                        name={name}
+                        autoComplete={isPhone ? 'tel' : undefined}
+                        maxLength={
+                            isPhone
+                                ? 40
+                                : name === 'relationship_other'
+                                  ? 100
+                                  : 255
+                        }
+                        min={
+                            name === 'estimated_burial_date'
+                                ? form.data.deceased_date_of_death || undefined
+                                : undefined
+                        }
+                        value={form.data[name]}
+                        onChange={(event) => {
+                            const value = event.target.value;
+                            if (isPhone && !phoneCharacters(value)) {
                                 form.setError(
                                     'applicant_whatsapp',
                                     'Gunakan angka, dengan +62 atau 08 untuk nomor Indonesia.',
                                 );
                                 return;
                             }
-                            form.clearErrors('applicant_whatsapp');
-                        }
-                        update(field, value);
-                    }}
-                />
-                {isPhone && form.errors.applicant_whatsapp && (
-                    <span
-                        id="applicant-phone-error"
-                        role="alert"
-                        className="text-sm text-navy"
-                    >
-                        {form.errors.applicant_whatsapp}
-                    </span>
+                            update(name, value);
+                        }}
+                    />
                 )}
-            </label>
+            </Field>
         );
     }
 
+    function choose(
+        name: Name,
+        label: string,
+        placeholder: string,
+        options: [string, string][],
+        settings: { optional?: boolean; className?: string } = {},
+    ) {
+        return (
+            <Field
+                name={name}
+                label={label}
+                required={!settings.optional}
+                optional={settings.optional}
+                error={errorFor(name)}
+                className={settings.className}
+            >
+                {(aria) => (
+                    <select
+                        {...aria}
+                        name={name}
+                        required={!settings.optional}
+                        value={form.data[name]}
+                        onChange={(event) => update(name, event.target.value)}
+                    >
+                        <option value="" disabled={!settings.optional}>
+                            {placeholder}
+                        </option>
+                        {options.map(([value, optionLabel]) => (
+                            <option key={value} value={value}>
+                                {optionLabel}
+                            </option>
+                        ))}
+                    </select>
+                )}
+            </Field>
+        );
+    }
+
+    const inline = stepFields[step];
     const messages = [
         ...new Set(
             [
                 ...Object.entries(form.errors)
-                    .filter(
-                        ([field]) =>
-                            step !== 0 || field !== 'applicant_whatsapp',
-                    )
+                    .filter(([field]) => !inline.includes(field))
                     .map(([, message]) => message),
                 networkError,
             ].filter(Boolean),
         ),
     ];
+    const yesNo: [string, string][] = [
+        ['1', 'Ya'],
+        ['0', 'Tidak'],
+    ];
     return (
         <main className="min-h-dvh bg-[#FAF8F3]">
             <Head title="Pengajuan layanan pemakaman" />
-            <header className="flex flex-wrap items-center justify-between gap-3 border-t-4 border-b border-gold border-b-navy/15 bg-white px-4 py-4 sm:px-8 xl:px-12">
-                <p className="font-semibold tracking-wide">
-                    Lestari Memorial Park
-                </p>
-                <Link
-                    href="/masuk"
-                    className={
-                        linkClass + ' inline-flex items-center gap-2 text-sm'
-                    }
-                >
-                    <LogIn className="size-4" aria-hidden="true" /> Masuk staf
-                </Link>
+            <header className="border-t-4 border-b border-gold border-b-navy/15 bg-white px-4 py-3 sm:px-8 xl:px-12">
+                <img
+                    src="/LESTARI.png"
+                    alt="Lestari Memorial Park"
+                    width={1996}
+                    height={675}
+                    className="h-10 w-auto"
+                />
             </header>
             <div className="mx-auto w-full max-w-[912px] px-4 pt-7 pb-12 sm:pt-10 sm:pb-20">
                 <h1 className="text-center text-2xl font-semibold sm:text-3xl">
                     Pengajuan layanan pemakaman
                 </h1>
-                <div className="mt-5 rounded-xl border border-navy/15 bg-white p-4 sm:mt-7 sm:p-10 sm:shadow-[0_10px_30px_#2433590d] lg:p-12">
+                {!receipt && step === 0 && (
+                    <p className="mx-auto mt-3 max-w-xl text-center text-base text-navy/80">
+                        Turut berduka cita. Kami akan menemani Anda langkah demi
+                        langkah.
+                    </p>
+                )}
+                <div className="mt-5 rounded-xl border border-navy/15 bg-white p-4 sm:mt-7 sm:p-10 lg:p-12">
                     {!receipt && (
                         <nav
                             aria-label="Langkah pengajuan"
@@ -396,7 +691,7 @@ export default function FuneralForm({
                                                     'absolute top-4 left-1/2 h-px w-full ' +
                                                     (index < step
                                                         ? 'bg-gold'
-                                                        : 'bg-navy/20')
+                                                        : 'bg-navy/30')
                                                 }
                                             />
                                         )}
@@ -407,7 +702,7 @@ export default function FuneralForm({
                                                     ? 'border-navy bg-navy text-white'
                                                     : index < step
                                                       ? 'border-gold bg-gold text-navy'
-                                                      : 'border-navy/30 bg-white text-navy')
+                                                      : 'border-navy/55 bg-white text-navy')
                                             }
                                         >
                                             {index < step ? (
@@ -426,10 +721,10 @@ export default function FuneralForm({
                                         </span>
                                         <span
                                             className={
-                                                'text-xs ' +
+                                                'text-xs sm:text-sm ' +
                                                 (index === step
                                                     ? 'font-semibold'
-                                                    : 'text-navy/75')
+                                                    : 'text-navy/80')
                                             }
                                         >
                                             <span className="sm:hidden">
@@ -446,55 +741,74 @@ export default function FuneralForm({
                     )}
                     <section className="min-w-0">
                         {receipt ? (
-                            <div
-                                role="status"
-                                className="space-y-3 rounded-lg border border-gold p-5"
-                            >
-                                <CircleCheck
-                                    className="size-8"
-                                    aria-hidden="true"
-                                />
-                                <h2 className="text-xl font-semibold">
-                                    Pengajuan diterima
-                                </h2>
-                                <p>{receipt.message}</p>
-                                <p>
-                                    Nomor referensi{' '}
-                                    <strong className="break-all">
-                                        {receipt.reference_code}
-                                    </strong>
-                                </p>
-                                <a href="/" className="underline">
-                                    Buat pengajuan baru
-                                </a>
-                            </div>
+                            <ReceiptCard receipt={receipt} />
                         ) : (
-                            <form className="space-y-5" onSubmit={submit}>
+                            <form
+                                noValidate
+                                className="space-y-5"
+                                onSubmit={submit}
+                            >
                                 <h2
                                     ref={heading}
                                     tabIndex={-1}
                                     className="border-b border-b-gold pb-3 text-xl font-semibold sm:text-2xl"
                                 >
-                                    Langkah {step + 1} dari 4: {labels[step]}
+                                    <span className="block text-sm font-normal text-navy/75">
+                                        Langkah {step + 1} dari 4
+                                    </span>
+                                    {labels[step]}
                                 </h2>
+                                {restored && (
+                                    <p
+                                        role="status"
+                                        className="rounded-md border border-navy/25 p-3 text-sm"
+                                    >
+                                        Isian sebelumnya dipulihkan di perangkat
+                                        ini.{' '}
+                                        <button
+                                            type="button"
+                                            onClick={startOver}
+                                            className={linkClass}
+                                        >
+                                            Mulai baru
+                                        </button>
+                                    </p>
+                                )}
                                 {messages.length > 0 && (
                                     <div
                                         ref={errors}
                                         tabIndex={-1}
                                         role="alert"
-                                        className="rounded border border-gold bg-gold/10 p-3 text-navy"
+                                        className="rounded-md border border-danger bg-danger-soft p-3 text-navy"
                                     >
-                                        <p className="font-semibold">
-                                            Periksa pengajuan sebelum mengirim
-                                            ulang.
+                                        <p className="flex items-center gap-2 font-semibold text-danger">
+                                            <CircleAlert
+                                                className="size-5 shrink-0"
+                                                aria-hidden="true"
+                                            />
+                                            Ada yang perlu diperiksa.
                                         </p>
-                                        <ul className="list-disc pl-5">
+                                        <ul className="mt-1 space-y-1">
                                             {messages.map((message) => (
                                                 <li key={message}>{message}</li>
                                             ))}
                                         </ul>
                                     </div>
                                 )}
+                                {step === 0 && (
+                                    <p className="text-sm text-navy/80 sm:text-base">
+                                        Yang perlu disiapkan: nomor WhatsApp
+                                        Anda, nama almarhum/almarhumah, dan
+                                        perkiraan waktu pemakaman. KTP dan surat
+                                        kematian boleh menyusul. Tanda * berarti
+                                        wajib diisi.
+                                    </p>
+                                )}
+                                {step === 1 || step === 2 ? (
+                                    <p className="text-sm text-navy/75">
+                                        Tanda * berarti wajib diisi.
+                                    </p>
+                                ) : null}
                                 <div aria-hidden="true" className="hidden">
                                     <input
                                         tabIndex={-1}
@@ -513,59 +827,31 @@ export default function FuneralForm({
                                     <div className="grid gap-4 sm:grid-cols-2 sm:gap-5">
                                         {input(
                                             'applicant_name',
-                                            'Nama lengkap pemohon',
+                                            'Nama lengkap Anda',
                                         )}
                                         {input(
                                             'applicant_whatsapp',
-                                            'Nomor WhatsApp pemohon',
+                                            'Nomor WhatsApp Anda',
                                             'tel',
                                         )}
-                                        <label
-                                            className={
-                                                formLabelClass +
-                                                ' sm:col-span-2'
-                                            }
-                                        >
-                                            Hubungan dengan almarhum/almarhumah{' '}
-                                            <span aria-hidden="true">*</span>
-                                            <select
-                                                name="relationship_to_deceased"
-                                                required
-                                                className={formFieldClass}
-                                                value={
-                                                    form.data
-                                                        .relationship_to_deceased
-                                                }
-                                                onChange={(event) =>
-                                                    update(
-                                                        'relationship_to_deceased',
-                                                        event.target.value,
-                                                    )
-                                                }
-                                            >
-                                                <option value="" disabled>
-                                                    Pilih hubungan
-                                                </option>
-                                                {relationships.map(
-                                                    (relationship) => (
-                                                        <option
-                                                            key={relationship}
-                                                        >
-                                                            {relationship}
-                                                        </option>
-                                                    ),
-                                                )}
-                                            </select>
-                                        </label>
-                                        {form.data.relationship_to_deceased ===
-                                            'Lainnya' && (
-                                            <div className="sm:col-span-2">
-                                                {input(
-                                                    'relationship_other',
-                                                    'Sebutkan hubungan',
-                                                )}
-                                            </div>
+                                        {choose(
+                                            'relationship_to_deceased',
+                                            'Hubungan dengan almarhum/almarhumah',
+                                            'Pilih hubungan',
+                                            relationships.map((value) => [
+                                                value,
+                                                value,
+                                            ]),
+                                            { className: 'sm:col-span-2' },
                                         )}
+                                        {form.data.relationship_to_deceased ===
+                                            'Lainnya' &&
+                                            input(
+                                                'relationship_other',
+                                                'Sebutkan hubungan',
+                                                'text',
+                                                { className: 'sm:col-span-2' },
+                                            )}
                                     </div>
                                 )}
                                 {step === 1 && (
@@ -579,117 +865,61 @@ export default function FuneralForm({
                                             'Tanggal meninggal',
                                             'date',
                                         )}
-                                        <div className="sm:col-span-2">
-                                            {input(
-                                                'funeral_home_location',
-                                                'Lokasi rumah duka',
-                                            )}
-                                        </div>
+                                        {input(
+                                            'funeral_home_location',
+                                            'Lokasi rumah duka',
+                                            'text',
+                                            { className: 'sm:col-span-2' },
+                                        )}
                                     </div>
                                 )}
                                 {step === 2 && (
                                     <div className="grid gap-4 sm:grid-cols-2 sm:gap-5">
-                                        <label
-                                            className={
-                                                formLabelClass +
-                                                ' sm:col-span-2'
-                                            }
-                                        >
-                                            Sudah memiliki lahan makam? *
-                                            <select
-                                                required
-                                                className={formFieldClass}
-                                                value={form.data.has_plot}
-                                                onChange={(event) =>
-                                                    update(
-                                                        'has_plot',
-                                                        event.target.value,
-                                                    )
-                                                }
-                                            >
-                                                <option value="">
-                                                    Pilih jawaban
-                                                </option>
-                                                <option value="1">Ya</option>
-                                                <option value="0">Tidak</option>
-                                            </select>
-                                        </label>
+                                        {choose(
+                                            'has_plot',
+                                            'Sudah memiliki lahan makam?',
+                                            'Pilih jawaban',
+                                            yesNo,
+                                            { className: 'sm:col-span-2' },
+                                        )}
                                         {form.data.has_plot === '1' && (
                                             <>
-                                                <label
-                                                    className={formLabelClass}
-                                                >
-                                                    Lokasi makam
-                                                    <select
-                                                        className={
-                                                            formFieldClass
-                                                        }
-                                                        value={
-                                                            form.data
-                                                                .burial_site
-                                                        }
-                                                        onChange={(event) =>
-                                                            update(
-                                                                'burial_site',
-                                                                event.target
-                                                                    .value,
-                                                            )
-                                                        }
-                                                    >
-                                                        <option value="">
-                                                            Belum diketahui
-                                                        </option>
-                                                        <option value="karawang">
-                                                            Karawang
-                                                        </option>
-                                                        <option value="tangerang">
-                                                            Tangerang
-                                                        </option>
-                                                    </select>
-                                                </label>
-                                                {input(
-                                                    'zone',
-                                                    'Zona',
-                                                    'text',
-                                                    false,
+                                                {choose(
+                                                    'burial_site',
+                                                    'Lokasi makam',
+                                                    'Belum diketahui',
+                                                    [
+                                                        [
+                                                            'karawang',
+                                                            'Karawang',
+                                                        ],
+                                                        [
+                                                            'tangerang',
+                                                            'Tangerang',
+                                                        ],
+                                                    ],
+                                                    { optional: true },
                                                 )}
+                                                {choose(
+                                                    'paid_in_full',
+                                                    'Pembayaran sudah lunas?',
+                                                    'Belum diketahui',
+                                                    yesNo,
+                                                    { optional: true },
+                                                )}
+                                                {input('zone', 'Zona', 'text', {
+                                                    optional: true,
+                                                    hint: 'Tertera di sertifikat kepemilikan makam.',
+                                                })}
                                                 {input(
                                                     'lot_number',
                                                     'Nomor lahan',
                                                     'text',
-                                                    false,
+                                                    {
+                                                        optional: true,
+                                                        hint: 'Tertera di sertifikat kepemilikan makam.',
+                                                    },
                                                 )}
-                                                <label
-                                                    className={formLabelClass}
-                                                >
-                                                    Pembayaran sudah lunas?
-                                                    <select
-                                                        className={
-                                                            formFieldClass
-                                                        }
-                                                        value={
-                                                            form.data
-                                                                .paid_in_full
-                                                        }
-                                                        onChange={(event) =>
-                                                            update(
-                                                                'paid_in_full',
-                                                                event.target
-                                                                    .value,
-                                                            )
-                                                        }
-                                                    >
-                                                        <option value="">
-                                                            Belum diketahui
-                                                        </option>
-                                                        <option value="1">
-                                                            Ya
-                                                        </option>
-                                                        <option value="0">
-                                                            Tidak
-                                                        </option>
-                                                    </select>
-                                                </label>
                                             </>
                                         )}
                                         {input(
@@ -708,7 +938,7 @@ export default function FuneralForm({
                                     <div className="space-y-6">
                                         <section
                                             aria-labelledby="documents-heading"
-                                            className="space-y-4"
+                                            className="space-y-3"
                                         >
                                             <header className="space-y-1">
                                                 <h3
@@ -733,13 +963,18 @@ export default function FuneralForm({
                                                 </p>
                                             </header>
                                             <ul className="divide-y divide-navy/15 rounded-lg border border-navy/20">
-                                                {Object.entries(documentLabels)
+                                                {(
+                                                    Object.entries(
+                                                        documentLabels,
+                                                    ) as [
+                                                        keyof typeof documentLabels,
+                                                        string,
+                                                    ][]
+                                                )
                                                     .filter(([type]) =>
                                                         visibleDocument(type),
                                                     )
-                                                    .map(([type, label]) => {
-                                                        const field =
-                                                            type as keyof typeof documentLabels;
+                                                    .map(([field, label]) => {
                                                         const selected =
                                                             form.data.documents[
                                                                 field
@@ -747,17 +982,109 @@ export default function FuneralForm({
                                                         return (
                                                             <li
                                                                 key={field}
-                                                                className="space-y-2 p-3 sm:p-4"
+                                                                className="space-y-2 p-3 sm:px-4"
                                                             >
-                                                                <p
-                                                                    id={
-                                                                        field +
-                                                                        '-label'
-                                                                    }
-                                                                    className="font-medium"
-                                                                >
-                                                                    {label}
-                                                                </p>
+                                                                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                                                                    <p
+                                                                        id={
+                                                                            field +
+                                                                            '-label'
+                                                                        }
+                                                                        className="font-medium"
+                                                                    >
+                                                                        {label}
+                                                                    </p>
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-navy/40 px-3 text-sm font-medium focus-within:outline-2 focus-within:outline-offset-2">
+                                                                            <Upload
+                                                                                className="size-4"
+                                                                                aria-hidden="true"
+                                                                            />
+                                                                            <span
+                                                                                id={
+                                                                                    field +
+                                                                                    '-action'
+                                                                                }
+                                                                            >
+                                                                                {selected
+                                                                                    ? 'Ganti berkas'
+                                                                                    : 'Pilih berkas'}
+                                                                            </span>
+                                                                            <input
+                                                                                type="file"
+                                                                                accept=".jpg,.jpeg,.png,.webp,.pdf"
+                                                                                className="sr-only"
+                                                                                disabled={
+                                                                                    form.processing
+                                                                                }
+                                                                                aria-labelledby={
+                                                                                    field +
+                                                                                    '-action ' +
+                                                                                    field +
+                                                                                    '-label'
+                                                                                }
+                                                                                aria-describedby="document-instructions"
+                                                                                onChange={(
+                                                                                    event,
+                                                                                ) => {
+                                                                                    const file =
+                                                                                        event
+                                                                                            .currentTarget
+                                                                                            .files?.[0];
+                                                                                    if (
+                                                                                        file
+                                                                                    )
+                                                                                        update(
+                                                                                            'documents',
+                                                                                            {
+                                                                                                ...form
+                                                                                                    .data
+                                                                                                    .documents,
+                                                                                                [field]:
+                                                                                                    file,
+                                                                                            },
+                                                                                        );
+                                                                                    event.currentTarget.value =
+                                                                                        '';
+                                                                                }}
+                                                                            />
+                                                                        </label>
+                                                                        {selected && (
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={
+                                                                                    form.processing
+                                                                                }
+                                                                                className="inline-flex min-h-11 items-center gap-1 px-2 text-sm underline underline-offset-4"
+                                                                                aria-label={
+                                                                                    'Hapus berkas ' +
+                                                                                    label
+                                                                                }
+                                                                                onClick={() => {
+                                                                                    const documents =
+                                                                                        {
+                                                                                            ...form
+                                                                                                .data
+                                                                                                .documents,
+                                                                                        };
+                                                                                    delete documents[
+                                                                                        field
+                                                                                    ];
+                                                                                    update(
+                                                                                        'documents',
+                                                                                        documents,
+                                                                                    );
+                                                                                }}
+                                                                            >
+                                                                                <X
+                                                                                    className="size-4"
+                                                                                    aria-hidden="true"
+                                                                                />{' '}
+                                                                                Hapus
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
                                                                 {selected && (
                                                                     <div
                                                                         role="status"
@@ -781,96 +1108,6 @@ export default function FuneralForm({
                                                                         </div>
                                                                     </div>
                                                                 )}
-                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                    <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-navy/40 px-3 text-sm font-medium focus-within:outline-2 focus-within:outline-offset-2">
-                                                                        <Upload
-                                                                            className="size-4"
-                                                                            aria-hidden="true"
-                                                                        />
-                                                                        <span
-                                                                            id={
-                                                                                field +
-                                                                                '-action'
-                                                                            }
-                                                                        >
-                                                                            {selected
-                                                                                ? 'Ganti berkas'
-                                                                                : 'Pilih berkas'}
-                                                                        </span>
-                                                                        <input
-                                                                            type="file"
-                                                                            accept=".jpg,.jpeg,.png,.webp,.pdf"
-                                                                            className="sr-only"
-                                                                            disabled={
-                                                                                form.processing
-                                                                            }
-                                                                            aria-labelledby={
-                                                                                field +
-                                                                                '-action ' +
-                                                                                field +
-                                                                                '-label'
-                                                                            }
-                                                                            aria-describedby="document-instructions"
-                                                                            onChange={(
-                                                                                event,
-                                                                            ) => {
-                                                                                const file =
-                                                                                    event
-                                                                                        .currentTarget
-                                                                                        .files?.[0];
-                                                                                if (
-                                                                                    file
-                                                                                )
-                                                                                    update(
-                                                                                        'documents',
-                                                                                        {
-                                                                                            ...form
-                                                                                                .data
-                                                                                                .documents,
-                                                                                            [field]:
-                                                                                                file,
-                                                                                        },
-                                                                                    );
-                                                                                event.currentTarget.value =
-                                                                                    '';
-                                                                            }}
-                                                                        />
-                                                                    </label>
-                                                                    {selected && (
-                                                                        <button
-                                                                            type="button"
-                                                                            disabled={
-                                                                                form.processing
-                                                                            }
-                                                                            className="inline-flex min-h-11 items-center gap-1 px-2 text-sm underline underline-offset-4"
-                                                                            aria-label={
-                                                                                'Hapus berkas ' +
-                                                                                label
-                                                                            }
-                                                                            onClick={() => {
-                                                                                const documents =
-                                                                                    {
-                                                                                        ...form
-                                                                                            .data
-                                                                                            .documents,
-                                                                                    };
-                                                                                delete documents[
-                                                                                    field
-                                                                                ];
-                                                                                update(
-                                                                                    'documents',
-                                                                                    documents,
-                                                                                );
-                                                                            }}
-                                                                        >
-                                                                            <X
-                                                                                className="size-4"
-                                                                                aria-hidden="true"
-                                                                            />{' '}
-                                                                            Hapus
-                                                                        </button>
-                                                                    )}
-                                                                </div>
                                                             </li>
                                                         );
                                                     })}
@@ -878,7 +1115,7 @@ export default function FuneralForm({
                                         </section>
                                         <section
                                             aria-labelledby="consent-heading"
-                                            className="space-y-3 rounded-lg border border-gold bg-gold/10 p-4"
+                                            className="space-y-3 rounded-lg border border-navy/25 p-4"
                                         >
                                             <h3
                                                 id="consent-heading"
@@ -886,25 +1123,49 @@ export default function FuneralForm({
                                             >
                                                 Persetujuan penggunaan data
                                             </h3>
-                                            <label className="flex items-start gap-3 text-sm leading-relaxed">
-                                                <input
-                                                    className="mt-1 size-4 shrink-0"
-                                                    type="checkbox"
-                                                    required
-                                                    checked={
-                                                        form.data
-                                                            .consent_accepted
-                                                    }
-                                                    onChange={(event) =>
-                                                        update(
-                                                            'consent_accepted',
-                                                            event.target
-                                                                .checked,
-                                                        )
-                                                    }
-                                                />
-                                                <span>{consentText}</span>
-                                            </label>
+                                            <div>
+                                                <label className="flex min-h-11 items-start gap-3 text-base leading-relaxed">
+                                                    <input
+                                                        id="field-consent_accepted"
+                                                        className="mt-1 size-5 shrink-0"
+                                                        type="checkbox"
+                                                        required
+                                                        aria-invalid={
+                                                            form.errors
+                                                                .consent_accepted
+                                                                ? true
+                                                                : undefined
+                                                        }
+                                                        aria-describedby={
+                                                            form.errors
+                                                                .consent_accepted
+                                                                ? 'consent-error'
+                                                                : undefined
+                                                        }
+                                                        checked={
+                                                            form.data
+                                                                .consent_accepted
+                                                        }
+                                                        onChange={(event) =>
+                                                            update(
+                                                                'consent_accepted',
+                                                                event.target
+                                                                    .checked,
+                                                            )
+                                                        }
+                                                    />
+                                                    <span>{consentText}</span>
+                                                </label>
+                                                {form.errors
+                                                    .consent_accepted && (
+                                                    <ErrorText id="consent-error">
+                                                        {
+                                                            form.errors
+                                                                .consent_accepted
+                                                        }
+                                                    </ErrorText>
+                                                )}
+                                            </div>
                                             {privacyUrl && (
                                                 <a
                                                     className={
@@ -941,14 +1202,15 @@ export default function FuneralForm({
                                                 </p>
                                             )}
                                             {challengeError && (
-                                                <p
+                                                <div
                                                     id="challenge-error"
                                                     tabIndex={-1}
                                                     role="alert"
-                                                    className="text-sm"
                                                 >
-                                                    {challengeError}
-                                                </p>
+                                                    <ErrorText>
+                                                        {challengeError}
+                                                    </ErrorText>
+                                                </div>
                                             )}
                                         </section>
                                     </div>
@@ -997,6 +1259,19 @@ export default function FuneralForm({
                         )}
                     </section>
                 </div>
+                <p className="mt-6 text-center text-base text-navy/80">
+                    Butuh bantuan? Hubungi kami lewat WhatsApp{' '}
+                    <a
+                        className={linkClass}
+                        href={helpWhatsApp.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        {helpWhatsApp.label}
+                        <span className="sr-only"> (membuka tab baru)</span>
+                    </a>
+                    .
+                </p>
             </div>
         </main>
     );

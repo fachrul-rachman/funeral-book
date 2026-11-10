@@ -6,6 +6,8 @@
 @theme {
     --color-navy: #243359;
     --color-gold: #d1b054;
+    --color-danger: #9b2c2c;
+    --color-danger-soft: #fbeeee;
     --font-sans:
         'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
         'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',

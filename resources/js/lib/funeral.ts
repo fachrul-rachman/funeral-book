@@ -40,6 +40,14 @@ export const documentLabels: Record<string, string> = {
 
 export const fieldClass =
     'block min-h-11 w-full min-w-0 rounded-md border border-navy/55 bg-white px-3 py-2 text-navy disabled:bg-navy/5';
+export const invalidFieldClass = fieldClass.replace(
+    'border-navy/55',
+    'border-danger ring-1 ring-danger',
+);
+export const helpWhatsApp = {
+    href: 'https://wa.me/6287788088820',
+    label: '+62 877-8808-8820',
+};
 export const buttonClass =
     'inline-flex min-h-11 items-center gap-2 rounded-md bg-navy px-4 py-2 font-semibold text-white hover:bg-navy/90 disabled:opacity-60';
 export const linkClass =

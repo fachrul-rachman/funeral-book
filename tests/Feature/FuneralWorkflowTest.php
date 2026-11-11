@@ -158,7 +158,7 @@ test('claim and advance reject stale statuses without duplicate evidence or inte
     expect(Storage::disk('local')->allFiles())->toHaveCount(1);
 });
 
-test('completion returns blockers and records one intent before making the request immutable', function () {
+test('completion still checks burial data and records one intent without supporting documents', function () {
     $service = app(FuneralRequests::class);
     $id = submitFuneral();
     $pic = User::factory()->create(['active' => true]);
@@ -168,16 +168,13 @@ test('completion returns blockers and records one intent before making the reque
         $service->transition($pic, $id, 'in_progress', 'completed');
         $this->fail('Completion should be blocked.');
     } catch (ValidationException $e) {
-        expect($e->errors())->toHaveKeys(['has_plot', 'zone', 'paid_in_full', 'deceased_ktp']);
+        expect(array_keys($e->errors()))->toBe(['has_plot', 'burial_site', 'zone', 'lot_number', 'paid_in_full']);
     }
     $service->edit($pic, $id, ['has_plot' => true, 'burial_site' => 'karawang', 'zone' => 'A', 'lot_number' => 'UJI', 'paid_in_full' => true]);
-    foreach (['plot_owner_ktp', 'deceased_ktp', 'hospital_death_certificate', 'ownership_certificate'] as $type) {
-        $service->attach($pic, $id, $type, contactPhoto());
-    }
-    $service->attach($pic, $id, 'deceased_ktp', UploadedFile::fake()->createWithContent('pending.pdf', "%PDF-1.4\n"));
-    $this->assertDatabaseHas('request_documents', ['type' => 'deceased_ktp', 'validation_state' => 'accepted', 'superseded_at' => null]);
-    $this->assertDatabaseHas('request_documents', ['type' => 'deceased_ktp', 'validation_state' => 'pending']);
+    $this->assertDatabaseCount('request_documents', 1);
+    $this->assertDatabaseHas('request_documents', ['funeral_request_id' => $id, 'type' => 'contact_evidence']);
     $service->transition($pic, $id, 'in_progress', 'completed');
+    $this->assertDatabaseHas('funeral_requests', ['id' => $id, 'status' => 'completed']);
     expect(DB::table('notification_deliveries')->where('event_type', 'completed')->count())->toBe(1);
     expect(fn () => $service->edit($pic, $id, ['lot_number' => 'UJI-2']))->toThrow(HttpException::class, 'Pengajuan sudah final.');
 });
@@ -233,6 +230,10 @@ test('only current accepted documents can be opened and access is audited', func
     $service->transition($pic, $id, 'new_request', 'contacted', contactPhoto());
     $service->attach($pic, $id, 'deceased_ktp', contactPhoto());
     $documentId = DB::table('request_documents')->where('type', 'deceased_ktp')->value('id');
+    config(['funeral.pdf_scanner' => null]);
+    $service->attach($pic, $id, 'deceased_ktp', UploadedFile::fake()->createWithContent('pending.pdf', "%PDF-1.4\n"));
+    $this->assertDatabaseHas('request_documents', ['id' => $documentId, 'validation_state' => 'accepted', 'superseded_at' => null]);
+    $this->assertDatabaseHas('request_documents', ['type' => 'deceased_ktp', 'validation_state' => 'pending']);
     $download = $service->openDocument($admin, $id, $documentId);
     fclose($download['stream']);
     $this->assertDatabaseHas('request_audit_logs', ['actor_user_id' => $admin->id, 'action' => 'document_accessed']);

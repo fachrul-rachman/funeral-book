@@ -431,14 +431,6 @@ class FuneralRequests
             }
         }
 
-        $documents = DB::table('request_documents')->where('funeral_request_id', $request->id)
-            ->where('validation_state', 'accepted')->whereNull('superseded_at')->get()->keyBy('type');
-        foreach (array_slice(self::DOCUMENTS, 0, 4) as $type) {
-            $document = $documents->get($type);
-            if (! $document || ! Storage::disk($document->storage_disk)->exists($document->object_key)) {
-                $blockers[$type] = 'Dokumen yang valid wajib tersedia.';
-            }
-        }
         if ($blockers !== []) {
             throw ValidationException::withMessages($blockers);
         }

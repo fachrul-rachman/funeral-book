@@ -635,7 +635,7 @@ export default function FuneralForm({
     ];
     return (
         <main className="min-h-dvh bg-[#FAF8F3]">
-            <Head title="Pengajuan layanan pemakaman" />
+            <Head title="Pengajuan Layanan Pemakaman" />
             <header className="border-t-4 border-b border-gold border-b-navy/15 bg-white px-4 py-3 sm:px-8 xl:px-12">
                 <img
                     src="/LESTARI.png"
@@ -647,7 +647,7 @@ export default function FuneralForm({
             </header>
             <div className="mx-auto w-full max-w-[912px] px-4 pt-7 pb-12 sm:pt-10 sm:pb-20">
                 <h1 className="text-center text-2xl font-semibold sm:text-3xl">
-                    Pengajuan layanan pemakaman
+                    Pengajuan Layanan Pemakaman
                 </h1>
                 {!receipt && step === 0 && (
                     <p className="mx-auto mt-3 max-w-xl text-center text-base text-navy/80">

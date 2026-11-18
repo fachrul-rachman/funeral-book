@@ -23,9 +23,9 @@ class WhatsAppDelivery
     public static function mayRetry(User $actor, stdClass $request, stdClass $delivery): bool
     {
         return $actor->active && (in_array($actor->role, ['manager', 'superadmin'], true)
-            || ($actor->role === 'pic' && ($delivery->event_type === 'completed'
-                ? $request->responsible_user_id === $actor->id
-                : $delivery->destination_e164 === $actor->phone)));
+            || ($actor->role === 'pic' && ($delivery->event_type === 'new_request'
+                ? $delivery->destination_e164 === $actor->phone
+                : $request->responsible_user_id === $actor->id)));
     }
 
     public function retryNotification(User $actor, string $requestId, string $deliveryId, bool $acknowledgeUncertain = false): void
@@ -58,7 +58,7 @@ class WhatsAppDelivery
                 'id' => $id, 'funeral_request_id' => $requestId, 'event_type' => $delivery->event_type,
                 'recipient_role' => $delivery->recipient_role, 'destination_e164' => $delivery->destination_e164,
                 'template_name' => config('funeral.templates.'.$delivery->event_type),
-                'template_parameters' => $delivery->event_type === 'new_request' ? $delivery->template_parameters : null,
+                'template_parameters' => $delivery->event_type === 'completed' ? null : $delivery->template_parameters,
                 'idempotency_key' => 'retry:'.$deliveryId.':'.$id, 'state' => 'pending',
                 'next_attempt_at' => $now, 'created_at' => $now, 'updated_at' => $now,
             ]);
@@ -136,11 +136,13 @@ class WhatsAppDelivery
 
             return;
         }
-        $buttonSuffix = 'pengajuan/'.$row->funeral_request_id;
-        if ($row->template_parameters !== null && $row->event_type === 'new_request') {
+        $buttonSuffix = $row->event_type === 'new_request' ? 'pengajuan/'.$row->funeral_request_id : null;
+        if ($row->template_parameters !== null && $row->event_type !== 'completed') {
             $parameters = json_decode($row->template_parameters, true, 512, JSON_THROW_ON_ERROR);
         } elseif ($row->event_type === 'new_request') {
             $parameters = self::newRequestParameters($request);
+        } elseif ($row->event_type === 'request_received') {
+            $parameters = [Str::squish($request->applicant_name)];
         } else {
             $plan = DB::table('visitation_plan_requests')->where('funeral_request_id', $request->id)
                 ->where('state', 'ready')->where('expires_at', '>', now()->utc())->first();
@@ -173,10 +175,12 @@ class WhatsAppDelivery
                 'parameters' => array_map(fn (string $value): array => ['type' => 'text', 'text' => $value], $parameters),
             ]],
         ];
-        $template['components'][] = [
-            'type' => 'button', 'sub_type' => 'url', 'index' => '0',
-            'parameters' => [['type' => 'text', 'text' => $buttonSuffix]],
-        ];
+        if ($buttonSuffix !== null) {
+            $template['components'][] = [
+                'type' => 'button', 'sub_type' => 'url', 'index' => '0',
+                'parameters' => [['type' => 'text', 'text' => $buttonSuffix]],
+            ];
+        }
 
         $version = config('funeral.whatsapp.version');
         $phoneId = config('funeral.whatsapp.phone_id');
@@ -264,7 +268,7 @@ class WhatsAppDelivery
             return null;
         }
 
-        $events = array_filter(['new_request', 'completed'], fn (string $event) => filled(config("funeral.whatsapp.languages.$event")));
+        $events = array_filter(['new_request', 'request_received', 'completed'], fn (string $event) => filled(config("funeral.whatsapp.languages.$event")));
         if ($events === []) {
             return null;
         }
@@ -273,7 +277,7 @@ class WhatsAppDelivery
             ->where('attempt_count', '<', self::MAX_ATTEMPTS)
             ->where(fn (Builder $q) => $q->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now()->utc()));
 
-        $due->where(fn (Builder $q) => $q->where('event_type', 'new_request')->orWhere(
+        $due->where(fn (Builder $q) => $q->whereIn('event_type', ['new_request', 'request_received'])->orWhere(
             fn (Builder $completed) => $completed->where('event_type', 'completed')->whereExists(
                 fn (Builder $plan) => $plan->selectRaw('1')->from('visitation_plan_requests')
                     ->whereColumn('visitation_plan_requests.funeral_request_id', 'notification_deliveries.funeral_request_id')
@@ -300,7 +304,7 @@ class WhatsAppDelivery
             $request->relationship_to_deceased,
             $request->deceased_name,
             CarbonImmutable::parse($request->deceased_date_of_death)->settings(['locale' => 'id'])->translatedFormat('d M Y'),
-            $request->funeral_home_location,
+            $request->funeral_home_location.(filled($request->funeral_home_room ?? null) ? ' (Ruangan: '.trim($request->funeral_home_room).')' : ''),
             $site,
             $schedule->settings(['locale' => 'id'])->translatedFormat('d M Y'),
             $schedule->format('H.i'),

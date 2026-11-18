@@ -25,6 +25,29 @@ function staffRequestFixture(): string
     ]);
 }
 
+test('the responsible staff can read update and clear a room only after claiming', function () {
+    $this->withoutVite();
+    $reference = staffRequestFixture();
+    $id = DB::table('funeral_requests')->where('reference_code', $reference)->value('id');
+    $url = '/staf/pengajuan/'.$id;
+    $pic = User::factory()->create(['role' => 'pic', 'active' => true]);
+    $this->actingAs($pic)->withSession(['staff_access_version' => $pic->access_version])->get($url)
+        ->assertInertia(fn (Assert $page) => $page->where('request.funeral_home_room', null));
+    $this->patch($url, ['funeral_home_room' => 'Anggrek 2'])->assertForbidden();
+    DB::table('funeral_requests')->where('id', $id)->update(['status' => 'contacted', 'responsible_user_id' => $pic->id]);
+    $this->patch($url, ['funeral_home_room' => 'Anggrek 2'])->assertRedirect($url);
+    $this->patch($url, ['deceased_name' => 'Nama Uji Baru'])->assertRedirect($url);
+    $this->get($url)->assertInertia(fn (Assert $page) => $page->where('request.funeral_home_room', 'Anggrek 2'));
+    $this->patch($url, ['funeral_home_room' => str_repeat('a', 256)])->assertSessionHasErrors('funeral_home_room');
+    $other = User::factory()->create(['role' => 'pic', 'active' => true]);
+    $this->actingAs($other)->withSession(['staff_access_version' => $other->access_version])
+        ->patch($url, ['funeral_home_room' => 'Melati 1'])->assertForbidden();
+    $this->assertDatabaseHas('funeral_requests', ['id' => $id, 'funeral_home_room' => 'Anggrek 2']);
+    $this->actingAs($pic)->withSession(['staff_access_version' => $pic->access_version])
+        ->patch($url, ['funeral_home_room' => ''])->assertRedirect($url);
+    $this->assertDatabaseHas('funeral_requests', ['id' => $id, 'funeral_home_room' => null]);
+});
+
 test('the WhatsApp button URL requires staff login and resolves to the protected detail', function () {
     $this->withoutVite();
     $reference = staffRequestFixture();

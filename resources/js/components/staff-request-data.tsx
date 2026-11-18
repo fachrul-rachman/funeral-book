@@ -21,6 +21,7 @@ export type RequestData = {
     deceased_name: string;
     deceased_date_of_death: string;
     funeral_home_location: string;
+    funeral_home_room: string | null;
     has_plot: boolean | number;
     burial_site: string | null;
     zone: string | null;
@@ -46,6 +47,7 @@ const labels: Record<string, string> = {
     deceased_name: 'Nama lengkap',
     deceased_date_of_death: 'Tanggal meninggal',
     funeral_home_location: 'Lokasi rumah duka',
+    funeral_home_room: 'Ruangan rumah duka',
     has_plot: 'Kepemilikan lahan',
     burial_site: 'Lokasi makam',
     zone: 'Zona',
@@ -97,6 +99,7 @@ function values(section: Section, record: RequestData): Record<string, string> {
             deceased_name: record.deceased_name,
             deceased_date_of_death: localDate(record.deceased_date_of_death),
             funeral_home_location: record.funeral_home_location,
+            funeral_home_room: record.funeral_home_room ?? '',
         };
     return {
         has_plot: record.has_plot ? '1' : '0',
@@ -216,7 +219,13 @@ function SectionEditor({
                 ) : (
                     <input
                         className={fieldClass + ' mt-1'}
-                        required={!['lot_number', 'zone'].includes(field)}
+                        required={
+                            ![
+                                'lot_number',
+                                'zone',
+                                'funeral_home_room',
+                            ].includes(field)
+                        }
                         name={field}
                         inputMode={date || time ? 'numeric' : undefined}
                         maxLength={
@@ -370,6 +379,7 @@ export default function StaffRequestData({
         deceased: {
             ...values('deceased', record),
             deceased_date_of_death: dateOnly(record.deceased_date_of_death),
+            funeral_home_room: record.funeral_home_room || 'Belum diisi',
         },
         burial: {
             has_plot: record.has_plot ? 'Ya' : 'Tidak',

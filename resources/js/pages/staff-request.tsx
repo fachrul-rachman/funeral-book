@@ -69,7 +69,7 @@ type Props = {
 
 type NotificationFailure = {
     id: string;
-    event_type: 'new_request' | 'completed';
+    event_type: 'new_request' | 'request_received' | 'completed';
     state: 'failed' | 'unknown';
     recipient_role: string | null;
     last_error_code: string | null;
@@ -102,9 +102,11 @@ function NotificationRetry({
             <p className="font-medium">
                 {delivery.event_type === 'completed'
                     ? 'Pesan customer'
-                    : 'Notifikasi tim (' +
-                      (roleLabels[delivery.recipient_role ?? ''] ?? 'Staf') +
-                      ')'}
+                    : delivery.event_type === 'request_received'
+                      ? 'Konfirmasi pengajuan diterima'
+                      : 'Notifikasi tim (' +
+                        (roleLabels[delivery.recipient_role ?? ''] ?? 'Staf') +
+                        ')'}
             </p>
             <p>
                 {uncertain

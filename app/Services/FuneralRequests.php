@@ -104,6 +104,7 @@ class FuneralRequests
                 foreach ($recipients as $recipient) {
                     $this->intent($id, 'new_request', $recipient->phone, $recipient->role, $recipient->id);
                 }
+                $this->intent($id, 'request_received', $data['applicant_whatsapp_e164']);
             });
         } catch (Throwable $error) {
             $this->discard($staged);
@@ -385,6 +386,7 @@ class FuneralRequests
             'deceased_name' => [$required, 'required', 'string', 'max:255'],
             'deceased_date_of_death' => [$required, 'required', 'date_format:Y-m-d'],
             'funeral_home_location' => [$required, 'required', 'string', 'max:255'],
+            'funeral_home_room' => ['nullable', 'string', 'max:255'],
             'has_plot' => [$required, 'required', 'boolean'],
             'burial_site' => ['exclude_if:has_plot,false,0', 'nullable', 'in:karawang,tangerang'],
             'zone' => ['exclude_if:has_plot,false,0', 'nullable', 'string', 'max:255'],
@@ -393,6 +395,9 @@ class FuneralRequests
             ...($submitting ? [] : ['current_burial_at' => ['sometimes', 'required', 'date_format:Y-m-d\TH:i:sP']]),
         ])->validate();
 
+        if (array_key_exists('funeral_home_room', $data)) {
+            $data['funeral_home_room'] = filled($data['funeral_home_room']) ? trim($data['funeral_home_room']) : null;
+        }
         if (array_key_exists('applicant_whatsapp', $data)) {
             $data['applicant_whatsapp_e164'] = self::normalizeApplicantPhone($data['applicant_whatsapp'])
                 ?? throw ValidationException::withMessages(['applicant_whatsapp' => 'Gunakan nomor WhatsApp Indonesia berawalan 08, 62, atau +62 dengan 10 sampai 13 digit angka.']);
@@ -570,7 +575,11 @@ class FuneralRequests
         $now = now()->utc();
         $deliveryId = (string) Str::uuid();
         $request = DB::table('funeral_requests')->where('id', $id)->first();
-        $parameters = $event === 'new_request' && $request !== null ? WhatsAppDelivery::newRequestParameters($request) : null;
+        $parameters = $request === null ? null : match ($event) {
+            'new_request' => WhatsAppDelivery::newRequestParameters($request),
+            'request_received' => [Str::squish($request->applicant_name)],
+            default => null,
+        };
         DB::table('notification_deliveries')->insert([
             'id' => $deliveryId, 'funeral_request_id' => $id, 'event_type' => $event,
             'template_parameters' => $parameters === null ? null : json_encode($parameters, JSON_THROW_ON_ERROR),

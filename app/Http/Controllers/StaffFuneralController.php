@@ -65,7 +65,7 @@ class StaffFuneralController extends Controller
             ->selectRaw("'visitation' as source")
             ->addSelect('v.validation_fields');
         if ($actor->role === 'pic') {
-            $whatsapp->where(fn (Builder $q) => $q->where(fn (Builder $customer) => $customer->where('n.event_type', 'completed')->where('f.responsible_user_id', $actor->id))
+            $whatsapp->where(fn (Builder $q) => $q->where(fn (Builder $customer) => $customer->whereIn('n.event_type', ['completed', 'request_received'])->where('f.responsible_user_id', $actor->id))
                 ->orWhere(fn (Builder $staff) => $staff->where('n.event_type', 'new_request')->where('n.destination_e164', $actor->phone)));
             $visitation->where('f.responsible_user_id', $actor->id)->where('f.status', 'in_progress')->whereNotNull('v.validation_fields');
         }
@@ -136,7 +136,7 @@ class StaffFuneralController extends Controller
         $actor = $this->actor($request);
         $record = DB::table('funeral_requests as f')->leftJoin('users as u', 'u.id', '=', 'f.responsible_user_id')
             ->where('f.id', $id)->first(['f.id', 'f.reference_code', 'f.status', 'f.responsible_user_id', 'f.applicant_name', 'f.applicant_whatsapp_e164',
-                'f.relationship_to_deceased', 'f.deceased_name', 'f.deceased_date_of_death', 'f.funeral_home_location',
+                'f.relationship_to_deceased', 'f.deceased_name', 'f.deceased_date_of_death', 'f.funeral_home_location', 'f.funeral_home_room',
                 'f.has_plot', 'f.burial_site', 'f.zone', 'f.lot_number', 'f.paid_in_full', 'f.current_burial_at',
                 'f.applicant_estimated_burial_at', 'f.submitted_at', 'f.first_contacted_at', 'f.completed_at', 'f.cancelled_at',
                 'f.cancellation_reason', 'f.consented_at', 'u.name as handler_name']);
@@ -241,7 +241,7 @@ class StaffFuneralController extends Controller
     {
         $data = $request->only([
             'applicant_name', 'applicant_whatsapp', 'relationship_to_deceased', 'deceased_name',
-            'deceased_date_of_death', 'funeral_home_location', 'has_plot', 'burial_site', 'zone', 'lot_number', 'paid_in_full', 'current_burial_at',
+            'deceased_date_of_death', 'funeral_home_location', 'funeral_home_room', 'has_plot', 'burial_site', 'zone', 'lot_number', 'paid_in_full', 'current_burial_at',
         ]);
         $service->edit($this->actor($request), $id, $data);
 

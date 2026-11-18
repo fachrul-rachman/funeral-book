@@ -154,7 +154,7 @@ test('claim and advance reject stale statuses without duplicate evidence or inte
         ->toThrow(HttpException::class, 'Status pengajuan telah berubah.');
     $this->assertDatabaseHas('funeral_requests', ['id' => $id, 'status' => 'in_progress', 'responsible_user_id' => $pic->id]);
     expect(DB::table('request_documents')->count())->toBe(1);
-    expect(DB::table('notification_deliveries')->count())->toBe(3);
+    expect(DB::table('notification_deliveries')->count())->toBe(4);
     expect(Storage::disk('local')->allFiles())->toHaveCount(1);
 });
 
@@ -218,7 +218,7 @@ test('submission failure rolls back the request and outbox and cleans staged fil
     $service->submit(funeralInput(), replay: $replay);
     expect(fn () => $service->submit(funeralInput(), ['deceased_ktp' => contactPhoto()], $replay))
         ->toThrow(UniqueConstraintViolationException::class);
-    $this->assertDatabaseCount('funeral_requests', 1)->assertDatabaseCount('notification_deliveries', 3);
+    $this->assertDatabaseCount('funeral_requests', 1)->assertDatabaseCount('notification_deliveries', 4);
     expect(Storage::disk('local')->allFiles())->toBe([]);
 });
 
@@ -249,7 +249,7 @@ test('a new request records one intent for each active eligible staff account', 
 
     submitFuneral();
 
-    $this->assertDatabaseCount('notification_deliveries', 4);
+    $this->assertDatabaseCount('notification_deliveries', 5);
     $this->assertDatabaseHas('notification_deliveries', ['destination_e164' => $secondPic->phone, 'recipient_role' => 'pic']);
     $this->assertDatabaseMissing('notification_deliveries', ['destination_e164' => $inactive->phone]);
     $this->assertDatabaseMissing('notification_deliveries', ['destination_e164' => $superadmin->phone]);
@@ -260,7 +260,7 @@ test('submission still succeeds when no eligible staff account is active', funct
 
     submitFuneral();
 
-    $this->assertDatabaseCount('funeral_requests', 1)->assertDatabaseCount('notification_deliveries', 0);
+    $this->assertDatabaseCount('funeral_requests', 1)->assertDatabaseCount('notification_deliveries', 1);
 });
 
 test('applicant phone inputs match the visitation contract before normalization', function (string $input, string $expected) {

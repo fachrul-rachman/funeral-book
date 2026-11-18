@@ -28,18 +28,19 @@ beforeEach(function () {
     Http::preventStrayRequests();
 });
 
-function whatsappIntent(): object
+function whatsappIntent(?string $room = null): object
 {
     User::factory()->create(['role' => 'pic', 'active' => true, 'phone' => '+6281234567890']);
     app(FuneralRequests::class)->submit([
         'applicant_name' => 'Pemohon Uji', 'applicant_whatsapp' => '081234567891',
         'relationship_to_deceased' => 'Keluarga', 'deceased_name' => 'Nama Uji',
         'deceased_date_of_death' => '2025-01-01', 'funeral_home_location' => 'Lokasi Uji',
+        'funeral_home_room' => $room,
         'has_plot' => false, 'estimated_burial_date' => now('Asia/Jakarta')->addDay()->toDateString(),
         'estimated_burial_time' => '10:00', 'consent_accepted' => true,
     ]);
 
-    return DB::table('notification_deliveries')->first();
+    return DB::table('notification_deliveries')->where('event_type', 'new_request')->first();
 }
 
 test('one intent sends once and Meta acceptance is recorded', function () {
@@ -64,6 +65,15 @@ test('one intent sends once and Meta acceptance is recorded', function () {
         && $request['template']['components'][0]['parameters'][10]['text'] === 'Belum memiliki lahan'
         && $request['template']['components'][0]['parameters'][11]['text'] === 'Belum diisi');
     $this->assertDatabaseHas('notification_deliveries', ['id' => $row->id, 'state' => 'accepted', 'attempt_count' => 1, 'provider_message_id' => 'wamid.test']);
+});
+
+test('the team template snapshots the room inside location without adding a variable', function () {
+    $row = whatsappIntent('Anggrek 2');
+    DB::table('funeral_requests')->where('id', $row->funeral_request_id)->update(['funeral_home_room' => 'Melati 1']);
+    Http::fake(['graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.room']]])]);
+    app(WhatsAppDelivery::class)->send($row->id);
+    Http::assertSent(fn ($request) => count($request['template']['components'][0]['parameters']) === 12
+        && $request['template']['components'][0]['parameters'][6]['text'] === 'Lokasi Uji (Ruangan: Anggrek 2)');
 });
 
 test('transient rejections retry with a limit while an ambiguous outcome does not resend', function () {
@@ -212,14 +222,14 @@ test('PIC may retry their own staff notification and repeat clicks cannot enqueu
     $url = '/staf/pengajuan/'.$row->funeral_request_id.'/notifikasi/'.$row->id.'/kirim-ulang';
     $this->post('/masuk', ['phone' => $pic->phone, 'password' => 'password']);
     $this->post($url)->assertRedirect('/staf/pengajuan/'.$row->funeral_request_id);
-    $replacement = DB::table('notification_deliveries')->where('id', '<>', $row->id)->first();
+    $replacement = DB::table('notification_deliveries')->where('id', DB::table('notification_deliveries')->where('id', $row->id)->value('superseded_by'))->first();
     expect($replacement->template_name)->toBe('newly_approved_template')->and($replacement->destination_e164)->toBe($row->destination_e164);
     $this->assertDatabaseHas('notification_deliveries', ['id' => $row->id, 'state' => 'failed', 'superseded_by' => $replacement->id]);
     $this->assertDatabaseHas('request_audit_logs', ['funeral_request_id' => $row->funeral_request_id, 'actor_user_id' => $pic->id, 'action' => 'notification_retry_requested']);
     $this->post($url)->assertConflict();
     $this->post($url, [], ['X-Inertia' => 'true'])->assertConflict()
         ->assertHeader('X-Inertia-Location', url('/staf/pengajuan/'.$row->funeral_request_id));
-    $this->assertDatabaseCount('notification_deliveries', 2);
+    $this->assertDatabaseCount('notification_deliveries', 3);
     Queue::assertPushed(SendWhatsAppDelivery::class, fn ($job) => $job->deliveryId === $replacement->id);
     Http::assertNothingSent();
 });
@@ -232,11 +242,11 @@ test('unknown sends require explicit duplicate-risk acknowledgement and accepted
     DB::table('notification_deliveries')->where('id', $row->id)->update(['state' => 'unknown', 'attempt_count' => 1]);
     $this->post('/masuk', ['phone' => $pic->phone, 'password' => 'password']);
     $this->post($url)->assertSessionHasErrors('retry');
-    $this->assertDatabaseCount('notification_deliveries', 1);
+    $this->assertDatabaseCount('notification_deliveries', 2);
     $this->post($url, ['acknowledge_uncertain' => true])->assertRedirect();
     $replacementId = DB::table('notification_deliveries')->where('id', $row->id)->value('superseded_by');
     DB::table('notification_deliveries')->where('id', $replacementId)->update(['state' => 'accepted', 'provider_message_id' => 'wamid.already-accepted']);
     $this->post(str_replace($row->id, $replacementId, $url))->assertConflict();
-    $this->assertDatabaseCount('notification_deliveries', 2);
+    $this->assertDatabaseCount('notification_deliveries', 3);
     Http::assertNothingSent();
 });

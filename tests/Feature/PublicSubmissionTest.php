@@ -33,14 +33,33 @@ test('the API replays a committed submission without consuming another token', f
     Http::fake(['challenges.cloudflare.com/*' => Http::response(['success' => true, 'hostname' => 'localhost', 'action' => 'funeral_submit'])]);
     $headers = ['Idempotency-Key' => (string) Str::uuid()];
     $payload = publicPayload();
+    $payload['funeral_home_room'] = 'Anggrek 2';
     $url = '/api/v1/funeral-requests';
     $receipt = $this->postJson($url, $payload, $headers)->assertCreated()->json();
     unset($payload['turnstile_token']);
     $this->postJson($url, $payload, $headers)->assertCreated()->assertExactJson($receipt);
     $this->postJson($url, ['applicant_name' => 'Berbeda'] + $payload, $headers)->assertConflict();
+    $this->postJson($url, ['funeral_home_room' => 'Melati 1'] + $payload, $headers)->assertConflict();
     Http::assertSentCount(1);
-    $this->assertDatabaseCount('funeral_requests', 1)->assertDatabaseCount('notification_deliveries', 3);
+    $this->assertDatabaseCount('funeral_requests', 1)->assertDatabaseCount('notification_deliveries', 4);
+    $this->assertDatabaseHas('funeral_requests', ['funeral_home_room' => 'Anggrek 2']);
 });
+
+test('the funeral home room is optional and accepted through the web form', function (?string $room) {
+    Http::fake(['challenges.cloudflare.com/*' => Http::response(['success' => true, 'hostname' => 'localhost', 'action' => 'funeral_submit'])]);
+    $this->post('/pengajuan', publicPayload() + [
+        'funeral_home_room' => $room, 'submission_key' => (string) Str::uuid(),
+    ])->assertRedirect('/')->assertSessionHas('funeral_receipt');
+    $this->assertDatabaseHas('funeral_requests', ['funeral_home_room' => filled($room) ? trim($room) : null]);
+})->with([null, '', '  Anggrek 2  ']);
+
+test('invalid funeral home rooms are rejected before any external call', function (mixed $room) {
+    $this->postJson('/api/v1/funeral-requests', publicPayload() + ['funeral_home_room' => $room], [
+        'Idempotency-Key' => (string) Str::uuid(),
+    ])->assertUnprocessable()->assertJsonValidationErrors('funeral_home_room');
+    Http::assertNothingSent();
+    $this->assertDatabaseCount('funeral_requests', 0);
+})->with([[123], [['room' => 'Anggrek']], [str_repeat('a', 256)]]);
 
 test('both public transports reject an invalid challenge', function () {
     Http::fake(['challenges.cloudflare.com/*' => Http::response(['success' => true, 'hostname' => 'other.example', 'action' => 'funeral_submit'])]);

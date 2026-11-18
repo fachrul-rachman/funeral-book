@@ -316,6 +316,6 @@ test('manager retry is refused when the customer reservation URL has expired', f
     $manager = User::factory()->create(['role' => 'manager', 'active' => true]);
     $this->post('/masuk', ['phone' => $manager->phone, 'password' => 'password']);
     $this->post('/staf/pengajuan/'.$id.'/notifikasi/'.$delivery->id.'/kirim-ulang')->assertSessionHasErrors('retry');
-    $this->assertDatabaseCount('notification_deliveries', 1);
+    $this->assertDatabaseCount('notification_deliveries', 2);
     Http::assertNothingSent();
 });

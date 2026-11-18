@@ -25,11 +25,13 @@ return [
         'test_recipient' => env('WHATSAPP_TEST_RECIPIENT'),
         'languages' => [
             'new_request' => env('FUNERAL_NEW_REQUEST_LANGUAGE'),
+            'request_received' => env('FUNERAL_REQUEST_RECEIVED_LANGUAGE', 'id'),
             'completed' => env('FUNERAL_COMPLETED_LANGUAGE'),
         ],
     ],
     'templates' => [
         'new_request' => env('FUNERAL_NEW_REQUEST_TEMPLATE') ?: 'funeral_new_request',
+        'request_received' => env('FUNERAL_REQUEST_RECEIVED_TEMPLATE') ?: 'funeral_request_received',
         'completed' => env('FUNERAL_COMPLETED_TEMPLATE') ?: 'funeral_completed',
     ],
 ];

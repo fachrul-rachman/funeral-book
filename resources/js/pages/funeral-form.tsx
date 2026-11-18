@@ -74,6 +74,7 @@ const text = {
     deceased_name: '',
     deceased_date_of_death: '',
     funeral_home_location: '',
+    funeral_home_room: '',
     has_plot: '',
     burial_site: '',
     zone: '',
@@ -95,7 +96,12 @@ type Errors = Partial<Record<AnyName, string>>;
 // Fields rendered inline on each step. Other server errors go to the summary.
 const stepFields: string[][] = [
     ['applicant_name', 'applicant_whatsapp', 'relationship_to_deceased'],
-    ['deceased_name', 'deceased_date_of_death', 'funeral_home_location'],
+    [
+        'deceased_name',
+        'deceased_date_of_death',
+        'funeral_home_location',
+        'funeral_home_room',
+    ],
     [
         'has_plot',
         'burial_site',
@@ -853,8 +859,12 @@ export default function FuneralForm({
                                         {input(
                                             'funeral_home_location',
                                             'Lokasi rumah duka',
+                                        )}
+                                        {input(
+                                            'funeral_home_room',
+                                            'Ruangan rumah duka',
                                             'text',
-                                            { className: 'sm:col-span-2' },
+                                            { optional: true },
                                         )}
                                     </div>
                                 )}

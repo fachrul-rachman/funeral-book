@@ -1,11 +1,13 @@
 <?php
 
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\User;
 use App\Services\FuneralRequests;
 use App\Services\VisitationPlans;
 use App\Services\WhatsAppDelivery;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -52,6 +54,47 @@ function completedVisitationRequest(array $overrides = []): string
 
     return $id;
 }
+
+test('the detail exposes the current completion outcome for automatic refresh', function (string $plan, string $delivery, string $expected) {
+    $this->withoutVite();
+    $id = completedVisitationRequest();
+    DB::table('visitation_plan_requests')->where('funeral_request_id', $id)->update(['state' => $plan]);
+    DB::table('notification_deliveries')->where('funeral_request_id', $id)->where('event_type', 'completed')->update(['state' => $delivery]);
+    DB::table('notification_deliveries')->where('funeral_request_id', $id)->where('event_type', 'request_received')->update(['state' => 'failed']);
+    $actor = User::findOrFail(DB::table('funeral_requests')->where('id', $id)->value('responsible_user_id'));
+    $this->actingAs($actor)->withSession(['staff_access_version' => $actor->access_version])
+        ->get('/staf/pengajuan/'.$id)->assertInertia(fn (Assert $page) => $page->where('completionState', $expected));
+})->with([
+    ['pending', 'pending', 'pending'],
+    ['processing', 'pending', 'pending'],
+    ['ready', 'pending', 'pending'],
+    ['ready', 'processing', 'pending'],
+    ['ready', 'accepted', 'accepted'],
+    ['failed', 'accepted', 'accepted'],
+    ['ready', 'delivered', 'accepted'],
+    ['ready', 'failed', 'failed'],
+    ['failed', 'pending', 'failed'],
+    ['ready', 'unknown', 'unknown'],
+]);
+
+test('completion polling follows the latest retry without disclosing delivery details', function () {
+    $this->withoutVite();
+    $id = completedVisitationRequest();
+    $old = DB::table('notification_deliveries')->where('funeral_request_id', $id)->where('event_type', 'completed')->sole();
+    $retry = (array) $old;
+    $retry['id'] = (string) Str::uuid();
+    $retry['idempotency_key'] = 'retry:'.$retry['id'];
+    DB::table('notification_deliveries')->insert($retry);
+    DB::table('notification_deliveries')->where('id', $old->id)->update(['state' => 'failed', 'superseded_by' => $retry['id']]);
+    $actor = User::findOrFail(DB::table('funeral_requests')->where('id', $id)->value('responsible_user_id'));
+    $this->actingAs($actor)->withSession(['staff_access_version' => $actor->access_version])
+        ->get('/staf/pengajuan/'.$id, [
+            'X-Inertia' => 'true', 'X-Inertia-Partial-Component' => 'staff-request',
+            'X-Inertia-Version' => app(HandleInertiaRequests::class)->version(Request::create('/staf/pengajuan/'.$id)) ?? '',
+            'X-Inertia-Partial-Data' => 'completionState',
+        ])->assertOk()->assertJsonPath('props.completionState', 'pending')
+        ->assertJsonMissingPath('props.documents')->assertJsonMissingPath('props.request');
+});
 
 test('completion waits for the visitation URL then sends a name body and a dynamic URL button', function () {
     $id = completedVisitationRequest();
@@ -203,7 +246,8 @@ test('burial validation returns a request to its handler for correction and reco
     $this->assertDatabaseMissing('notification_deliveries', ['funeral_request_id' => $id, 'event_type' => 'completed']);
     $this->post('/masuk', ['phone' => $actor->phone, 'password' => 'password']);
     $this->get('/staf/pengajuan/'.$id)->assertInertia(fn (Assert $page) => $page
-        ->where('canEdit', true)->where('visitation.validation_fields', ['burial.zone', 'burial.lot_number']));
+        ->where('canEdit', true)->where('completionState', null)
+        ->where('visitation.validation_fields', ['burial.zone', 'burial.lot_number']));
     $this->get('/staf')->assertInertia(fn (Assert $page) => $page
         ->where('deliveryAlerts.total', 1)->where('deliveryAlerts.data.0.validation_fields', ['burial.zone', 'burial.lot_number']));
     app(FuneralRequests::class)->edit($actor, $id, ['zone' => 'B', 'lot_number' => '0007']);

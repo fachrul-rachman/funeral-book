@@ -171,6 +171,18 @@ class StaffFuneralController extends Controller
             $visitation->validation_fields = json_decode($visitation->validation_fields ?? '[]', true);
         }
 
+        $completionState = null;
+        if ($record->status === 'completed') {
+            $deliveryState = DB::table('notification_deliveries')->where('funeral_request_id', $id)
+                ->where('event_type', 'completed')->whereNull('superseded_by')->orderByDesc('created_at')->value('state');
+            $completionState = match (true) {
+                in_array($deliveryState, ['accepted', 'sent', 'delivered', 'read'], true) => 'accepted',
+                $deliveryState === 'unknown' => 'unknown',
+                $deliveryState === null || $deliveryState === 'failed' || $visitation?->state === 'failed' => 'failed',
+                default => 'pending',
+            };
+        }
+
         $notificationFailures = DB::table('notification_deliveries')->where('funeral_request_id', $id)
             ->whereIn('state', ['failed', 'unknown'])->whereNull('superseded_by')->orderByDesc('updated_at')
             ->get(['id', 'event_type', 'state', 'recipient_role', 'last_error_code', 'provider_message_id', 'destination_e164'])
@@ -189,6 +201,7 @@ class StaffFuneralController extends Controller
             'canTransfer' => $canTransfer,
             'handlers' => $canTransfer ? User::query()->where('active', true)->whereIn('role', FuneralRequests::HANDLERS)->orderBy('name')->get(['id', 'name', 'role']) : [],
             'notice' => $request->session()->get('workflow_notice'),
+            'completionState' => $completionState,
             'visitation' => $record->status === 'cancelled' ? null : $visitation,
             'notificationFailures' => $notificationFailures,
             'documents' => DB::table('request_documents')->where('funeral_request_id', $id)->whereNull('superseded_at')

@@ -1,8 +1,10 @@
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { ArrowLeft, LoaderCircle, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import ConfirmDialog from '../components/confirm-dialog';
+import CompletionProgress from '../components/completion-progress';
+import type { CompletionState } from '../components/completion-progress';
 import Notice from '../components/notice';
 import StaffLayout from '../components/staff-layout';
 import StaffRequestData, {
@@ -56,6 +58,7 @@ type Props = {
     canProcess: boolean;
     canTransfer: boolean;
     notice: string | null;
+    completionState: CompletionState;
     visitation: {
         state: string;
         last_error_code: string | null;
@@ -194,6 +197,7 @@ function StatusPanel({
     canTransfer,
     handlers,
     notice,
+    completionState,
     visitation,
     notificationFailures,
     url,
@@ -204,6 +208,7 @@ function StatusPanel({
     | 'canTransfer'
     | 'handlers'
     | 'notice'
+    | 'completionState'
     | 'visitation'
     | 'notificationFailures'
 > & { url: string }) {
@@ -214,6 +219,7 @@ function StatusPanel({
         contact_evidence: null as File | null,
     });
     const transfer = useForm({ recipient_id: '' });
+    const [submitIssue, setSubmitIssue] = useState('');
     const [confirming, setConfirming] = useState<
         'completed' | 'cancelled' | null
     >(null);
@@ -225,6 +231,7 @@ function StatusPanel({
               : 'completed';
 
     function submitStatus(target: string) {
+        if (status.processing || submitIssue) return;
         status.transform((data) => ({
             expected_status: request.status,
             target,
@@ -235,6 +242,18 @@ function StatusPanel({
         status.post(url + '/status', {
             preserveScroll: true,
             onSuccess: () => status.reset(),
+            onNetworkError: () => {
+                setSubmitIssue(
+                    'Koneksi terputus. Hasil perubahan belum dapat dipastikan. Periksa status terbaru sebelum mencoba lagi.',
+                );
+                return false;
+            },
+            onHttpException: () => {
+                setSubmitIssue(
+                    'Perubahan belum dapat dikonfirmasi. Periksa status terbaru sebelum mencoba lagi.',
+                );
+                return false;
+            },
         });
     }
 
@@ -261,6 +280,22 @@ function StatusPanel({
     return (
         <section className="order-1 min-w-0 space-y-4 rounded-lg border border-navy/15 bg-white p-4 sm:p-5">
             <h2 className="text-lg font-semibold">Status dan tindakan</h2>
+            <CompletionProgress
+                key={completionState ?? 'idle'}
+                state={completionState}
+            />
+            {submitIssue && (
+                <Notice tone="warning">
+                    <p>{submitIssue}</p>
+                    <button
+                        type="button"
+                        className={secondaryButtonClass + ' mt-2'}
+                        onClick={() => window.location.reload()}
+                    >
+                        Periksa status
+                    </button>
+                </Notice>
+            )}
             {notice && <Notice tone="info">{notice}</Notice>}
             {!canProcess && (
                 <p className="text-sm font-medium text-navy/70">
@@ -359,47 +394,58 @@ function StatusPanel({
                                 buttonClass +
                                 ' w-full justify-center text-center'
                             }
-                            disabled={status.processing}
+                            disabled={status.processing || !!submitIssue}
+                            aria-busy={status.processing}
                         >
-                            {next === 'contacted'
-                                ? 'Klaim dan tandai sudah dihubungi'
-                                : next === 'in_progress'
-                                  ? 'Mulai proses'
-                                  : 'Selesaikan pengajuan'}
+                            {status.processing && (
+                                <LoaderCircle
+                                    className="size-4 motion-safe:animate-spin"
+                                    aria-hidden="true"
+                                />
+                            )}
+                            {status.processing
+                                ? 'Memproses…'
+                                : next === 'contacted'
+                                  ? 'Klaim dan tandai sudah dihubungi'
+                                  : next === 'in_progress'
+                                    ? 'Mulai proses'
+                                    : 'Selesaikan pengajuan'}
                         </button>
                     </form>
                 </>
             )}
-            {visitation && (
-                <Notice
-                    tone={
-                        visitation.validation_fields.length > 0
-                            ? 'warning'
-                            : visitation.state === 'failed'
-                              ? 'danger'
-                              : 'info'
-                    }
-                    title="Tautan ziarah"
-                >
-                    <p>
-                        {visitation.validation_fields.length > 0
-                            ? visitationCorrectionMessage(
-                                  visitation.validation_fields,
-                              )
-                            : visitation.state === 'ready'
-                              ? 'Tautan berhasil diperoleh'
-                              : visitation.state === 'failed'
-                                ? 'Tautan belum berhasil diperoleh. Pesan customer ditahan.'
-                                : 'Menunggu tautan sebelum pesan customer dikirim.'}
-                    </p>
-                    {visitation.last_error_code &&
-                        visitation.validation_fields.length === 0 && (
-                            <p className="text-xs">
-                                Kode: {visitation.last_error_code}
-                            </p>
-                        )}
-                </Notice>
-            )}
+            {visitation &&
+                (visitation.validation_fields.length > 0 ||
+                    visitation.state === 'failed') && (
+                    <Notice
+                        tone={
+                            visitation.validation_fields.length > 0
+                                ? 'warning'
+                                : visitation.state === 'failed'
+                                  ? 'danger'
+                                  : 'info'
+                        }
+                        title="Tautan ziarah"
+                    >
+                        <p>
+                            {visitation.validation_fields.length > 0
+                                ? visitationCorrectionMessage(
+                                      visitation.validation_fields,
+                                  )
+                                : visitation.state === 'ready'
+                                  ? 'Tautan berhasil diperoleh'
+                                  : visitation.state === 'failed'
+                                    ? 'Tautan belum berhasil diperoleh. Pesan customer ditahan.'
+                                    : 'Menunggu tautan sebelum pesan customer dikirim.'}
+                        </p>
+                        {visitation.last_error_code &&
+                            visitation.validation_fields.length === 0 && (
+                                <p className="text-xs">
+                                    Kode: {visitation.last_error_code}
+                                </p>
+                            )}
+                    </Notice>
+                )}
             {notificationFailures.length > 0 && (
                 <Notice
                     tone={failedDelivery ? 'danger' : 'warning'}

@@ -17,7 +17,6 @@ import FieldError from '../components/field-error';
 import {
     buttonClass,
     fieldClass,
-    helpWhatsApp,
     invalidFieldClass,
     linkClass,
 } from '../lib/funeral';
@@ -1245,19 +1244,6 @@ export default function FuneralForm({
                         )}
                     </section>
                 </div>
-                <p className="mt-6 text-center text-base text-navy/80">
-                    Butuh bantuan? Hubungi kami lewat WhatsApp{' '}
-                    <a
-                        className={linkClass}
-                        href={helpWhatsApp.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                    >
-                        {helpWhatsApp.label}
-                        <span className="sr-only"> (membuka tab baru)</span>
-                    </a>
-                    .
-                </p>
             </div>
         </main>
     );

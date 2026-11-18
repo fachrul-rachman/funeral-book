@@ -76,10 +76,6 @@ export const invalidFieldClass = fieldClass.replace(
     'border-navy/55',
     'border-danger ring-1 ring-danger',
 );
-export const helpWhatsApp = {
-    href: 'https://wa.me/6287788088820',
-    label: '+62 877-8808-8820',
-};
 export const buttonClass =
     'inline-flex min-h-11 items-center gap-2 rounded-md bg-navy px-4 py-2 font-semibold text-white hover:bg-navy/90 disabled:opacity-60';
 export const secondaryButtonClass =

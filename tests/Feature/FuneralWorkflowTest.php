@@ -179,6 +179,36 @@ test('completion still checks burial data and records one intent without support
     expect(fn () => $service->edit($pic, $id, ['lot_number' => 'UJI-2']))->toThrow(HttpException::class, 'Pengajuan sudah final.');
 });
 
+test('completion accepts either payment answer but still requires plot ownership zone and lot', function (mixed $payment) {
+    $service = app(FuneralRequests::class);
+    $id = submitFuneral();
+    $pic = User::factory()->create(['active' => true]);
+    $service->transition($pic, $id, 'new_request', 'contacted', contactPhoto());
+    $service->transition($pic, $id, 'contacted', 'in_progress');
+    $service->edit($pic, $id, ['has_plot' => true, 'burial_site' => 'karawang', 'zone' => 'A', 'lot_number' => 'UJI', 'paid_in_full' => $payment]);
+    if ($payment === null) {
+        try {
+            $service->transition($pic, $id, 'in_progress', 'completed');
+            $this->fail('An unanswered payment question should block completion.');
+        } catch (ValidationException $error) {
+            expect(array_keys($error->errors()))->toBe(['paid_in_full']);
+        }
+        $this->assertDatabaseHas('funeral_requests', ['id' => $id, 'status' => 'in_progress']);
+        $this->assertDatabaseMissing('notification_deliveries', ['funeral_request_id' => $id, 'event_type' => 'completed']);
+
+        return;
+    }
+    foreach (['zone', 'lot_number'] as $field) {
+        $service->edit($pic, $id, [$field => '']);
+        expect(fn () => $service->transition($pic, $id, 'in_progress', 'completed'))->toThrow(ValidationException::class);
+        $service->edit($pic, $id, [$field => 'UJI']);
+    }
+    $service->transition($pic, $id, 'in_progress', 'completed');
+    $this->assertDatabaseHas('funeral_requests', ['id' => $id, 'status' => 'completed', 'paid_in_full' => (bool) $payment]);
+    expect(DB::table('notification_deliveries')->where('funeral_request_id', $id)->where('event_type', 'completed')->count())->toBe(1);
+    $this->assertDatabaseHas('visitation_plan_requests', ['funeral_request_id' => $id, 'state' => 'pending']);
+})->with([true, false, 1, 0, null]);
+
 test('account eligibility protects an assigned request until a manager transfers it', function () {
     $service = app(FuneralRequests::class);
     $id = submitFuneral();

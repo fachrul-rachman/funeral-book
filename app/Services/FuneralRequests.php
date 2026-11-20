@@ -428,7 +428,7 @@ class FuneralRequests
             'burial_site' => $request->burial_site,
             'zone' => trim($request->zone ?? '') !== '',
             'lot_number' => trim($request->lot_number ?? '') !== '',
-            'paid_in_full' => $request->paid_in_full,
+            'paid_in_full' => $request->paid_in_full !== null,
             'current_burial_at' => $request->current_burial_at,
         ] as $field => $valid) {
             if (! $valid) {

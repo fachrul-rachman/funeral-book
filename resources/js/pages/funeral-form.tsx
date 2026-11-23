@@ -208,17 +208,17 @@ function Field({
                     </span>
                 )}
             </label>
-            {hint && (
-                <p id={id + '-hint'} className="mt-0.5 text-sm text-navy/75">
-                    {hint}
-                </p>
-            )}
             {children({
                 id,
                 className: controlClass(!!error),
                 'aria-invalid': error ? true : undefined,
                 'aria-describedby': describedBy,
             })}
+            {hint && (
+                <p id={id + '-hint'} className="mt-1.5 text-sm text-navy/75">
+                    {hint}
+                </p>
+            )}
             {error && <FieldError id={id + '-error'}>{error}</FieldError>}
         </div>
     );

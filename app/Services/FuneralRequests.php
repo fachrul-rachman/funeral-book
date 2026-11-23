@@ -49,6 +49,11 @@ class FuneralRequests
         return str_starts_with($digits, '628') ? '0'.substr($digits, 2) : $digits;
     }
 
+    public static function normalizeLotNumber(string $value): string
+    {
+        return preg_replace('/[\s\p{Z}]+/u', '', $value) ?? $value;
+    }
+
     /** @param array<string, mixed> $input
      * @param  array<string, UploadedFile>  $documents
      * @param  array{digest: string, fingerprint: string, different_deceased_confirmed?: bool}|null  $replay
@@ -412,6 +417,9 @@ class FuneralRequests
             ...($submitting ? [] : ['current_burial_at' => ['sometimes', 'required', 'date_format:Y-m-d\TH:i:sP']]),
         ])->validate();
 
+        if (isset($data['lot_number'])) {
+            $data['lot_number'] = self::normalizeLotNumber($data['lot_number']);
+        }
         if (array_key_exists('funeral_home_room', $data)) {
             $data['funeral_home_room'] = filled($data['funeral_home_room']) ? trim($data['funeral_home_room']) : null;
         }
@@ -461,7 +469,7 @@ class FuneralRequests
             'has_plot' => $request->has_plot,
             'burial_site' => $request->burial_site,
             'zone' => trim($request->zone ?? '') !== '',
-            'lot_number' => trim($request->lot_number ?? '') !== '',
+            'lot_number' => self::normalizeLotNumber($request->lot_number ?? '') !== '',
             'paid_in_full' => $request->paid_in_full !== null,
             'current_burial_at' => $request->current_burial_at,
         ] as $field => $valid) {

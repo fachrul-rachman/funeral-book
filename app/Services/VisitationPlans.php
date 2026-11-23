@@ -178,7 +178,8 @@ class VisitationPlans
             ],
             'deceased' => ['name' => $request->deceased_name, 'date_of_death' => $request->deceased_date_of_death],
             'burial' => [
-                'site' => $request->burial_site, 'zone' => $request->zone, 'lot_number' => $request->lot_number,
+                'site' => $request->burial_site, 'zone' => $request->zone,
+                'lot_number' => FuneralRequests::normalizeLotNumber($request->lot_number ?? ''),
                 'scheduled_at' => CarbonImmutable::parse($request->current_burial_at, 'UTC')->setTimezone('Asia/Jakarta')->toIso8601String(),
             ],
         ];

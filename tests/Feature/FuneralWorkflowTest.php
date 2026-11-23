@@ -10,6 +10,7 @@ use Illuminate\Filesystem\AwsS3V3Adapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -157,6 +158,23 @@ test('claim and advance reject stale statuses without duplicate evidence or inte
     expect(DB::table('notification_deliveries')->count())->toBe(4);
     expect(Storage::disk('local')->allFiles())->toHaveCount(1);
 });
+
+test('lot numbers remove whitespace on both submission and staff edits without changing other characters', function (string $input, string $expected) {
+    Queue::fake();
+    $service = app(FuneralRequests::class);
+    $reference = $service->submit(funeralInput(['has_plot' => true, 'lot_number' => $input]));
+    $id = DB::table('funeral_requests')->where('reference_code', $reference)->value('id');
+    $this->assertDatabaseHas('funeral_requests', ['id' => $id, 'lot_number' => $expected]);
+    $pic = User::factory()->create(['active' => true]);
+    $service->transition($pic, $id, 'new_request', 'contacted', contactPhoto());
+    $service->edit($pic, $id, ['lot_number' => ' '.$input.' ']);
+    $this->assertDatabaseHas('funeral_requests', ['id' => $id, 'lot_number' => $expected]);
+})->with([
+    ['DL 108', 'DL108'],
+    ["\t DL\u{00A0}108 \n", 'DL108'],
+    [' dl-001/08 ', 'dl-001/08'],
+    ['00 07', '0007'],
+]);
 
 test('completion still checks burial data and records one intent without supporting documents', function () {
     $service = app(FuneralRequests::class);

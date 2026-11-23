@@ -213,6 +213,29 @@ test('malformed success retries and a link expiring before WhatsApp is held visi
     $this->assertDatabaseHas('notification_deliveries', ['id' => $delivery->id, 'attempt_count' => 0]);
 });
 
+test('new visitation snapshots normalize legacy lot whitespace without changing a retry snapshot', function () {
+    $id = completedVisitationRequest(['lot_number' => 'DL108']);
+    DB::table('funeral_requests')->where('id', $id)->update(['lot_number' => ' DL 108 ']);
+    DB::table('visitation_plan_requests')->where('funeral_request_id', $id)->delete();
+    $plans = app(VisitationPlans::class);
+    $plans->ensure($id);
+    $snapshot = DB::table('visitation_plan_requests')->where('funeral_request_id', $id)->value('payload');
+    expect(json_decode($snapshot, true)['burial']['lot_number'])->toBe('DL108');
+    DB::table('funeral_requests')->where('id', $id)->update(['lot_number' => 'DL 999']);
+    $plans->ensure($id);
+    expect(DB::table('visitation_plan_requests')->where('funeral_request_id', $id)->value('payload'))->toBe($snapshot);
+    Http::fake(['visitation.example.test/*' => Http::sequence()->push([], 429)->push([
+        'url' => 'https://visitation.example.test/plan/normalized-lot', 'expires_at' => now()->addDays(5)->toIso8601String(),
+    ], 201)]);
+    $plans->create($id);
+    $this->travel(1)->minutes();
+    $plans->create($id);
+    Http::assertSentCount(2);
+    Http::assertSent(fn ($request) => $request['burial']['lot_number'] === 'DL108');
+    $calls = Http::recorded();
+    expect($calls[0][0]->data())->toBe($calls[1][0]->data());
+});
+
 test('zone is separate from lot and discarded when no plot is owned', function () {
     $service = app(FuneralRequests::class);
     $id = completedVisitationRequest(['zone' => '0', 'lot_number' => '0007']);

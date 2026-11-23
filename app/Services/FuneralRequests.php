@@ -51,7 +51,7 @@ class FuneralRequests
 
     /** @param array<string, mixed> $input
      * @param  array<string, UploadedFile>  $documents
-     * @param  array{digest: string, fingerprint: string}|null  $replay
+     * @param  array{digest: string, fingerprint: string, different_deceased_confirmed?: bool}|null  $replay
      */
     public function submit(array $input, array $documents = [], ?array $replay = null): string
     {
@@ -61,6 +61,9 @@ class FuneralRequests
         $now = now()->utc();
         if ($estimate->lte($now)) {
             throw ValidationException::withMessages(['estimated_burial_time' => 'Perkiraan waktu pemakaman harus di masa depan.']);
+        }
+        if ($replay !== null) {
+            $this->checkDuplicate($data, $replay);
         }
 
         $id = (string) Str::uuid();
@@ -81,6 +84,15 @@ class FuneralRequests
             }
 
             DB::transaction(function () use ($id, $reference, $data, $estimate, $now, $staged, $replay) {
+                if ($replay !== null) {
+                    if (DB::getDriverName() === 'pgsql') {
+                        // Serialize this matching pair even when neither request exists yet.
+                        DB::select('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+                            hash('sha256', $data['applicant_whatsapp_e164'].':'.$data['deceased_date_of_death']),
+                        ]);
+                    }
+                    $this->checkDuplicate($data, $replay);
+                }
                 DB::table('funeral_requests')->insert($data + [
                     'id' => $id, 'reference_code' => $reference, 'status' => 'new_request',
                     'applicant_estimated_burial_at' => $estimate, 'current_burial_at' => $estimate,
@@ -94,7 +106,8 @@ class FuneralRequests
                         'funeral_request_id' => $id, 'expires_at' => $now->copy()->addDay(),
                     ]);
                 }
-                $this->audit($id, null, 'submitted');
+                $this->audit($id, null, 'submitted', after: ($replay['different_deceased_confirmed'] ?? false)
+                    ? ['different_deceased_confirmed' => true] : []);
                 foreach ($staged as $document) {
                     $this->saveDocument($document);
                 }
@@ -103,6 +116,10 @@ class FuneralRequests
                     ->get(['id', 'phone', 'role']);
                 foreach ($recipients as $recipient) {
                     $this->intent($id, 'new_request', $recipient->phone, $recipient->role, $recipient->id);
+                }
+                $marketing = DB::table('notification_settings')->where('id', 1)->value('marketing_whatsapp_e164');
+                if (! $data['has_plot'] && filled($marketing) && ! $recipients->contains('phone', $marketing)) {
+                    $this->intent($id, 'new_request', $marketing, 'marketing', 'marketing');
                 }
                 $this->intent($id, 'request_received', $data['applicant_whatsapp_e164']);
             });
@@ -408,6 +425,23 @@ class FuneralRequests
         }
 
         return $data;
+    }
+
+    /** @param array<string, mixed> $data
+     * @param  array{digest: string, fingerprint: string, different_deceased_confirmed?: bool}  $replay
+     */
+    private function checkDuplicate(array $data, array $replay): void
+    {
+        if (($replay['different_deceased_confirmed'] ?? false)
+            || DB::table('public_submission_keys')->where('key_digest', $replay['digest'])->where('expires_at', '>', now()->utc())->exists()) {
+            return;
+        }
+        if (DB::table('funeral_requests')->where('applicant_whatsapp_e164', $data['applicant_whatsapp_e164'])
+            ->where('deceased_date_of_death', $data['deceased_date_of_death'])->where('status', '<>', 'cancelled')->exists()) {
+            throw ValidationException::withMessages([
+                'different_deceased_confirmed' => 'Ada pengajuan dengan nomor WhatsApp dan tanggal meninggal yang sama. Pastikan keluarga belum mengajukan sebelumnya.',
+            ]);
+        }
     }
 
     private function validateCompletion(stdClass $request): void

@@ -31,6 +31,7 @@ Route::middleware(['auth', RequireActiveStaff::class])->group(function () {
         Route::get('/dokumen/{document}', [StaffFuneralController::class, 'download'])->whereUuid('document');
     });
     Route::get('/staf/pengguna', [StaffAccountsController::class, 'index'])->can('manage', User::class)->name('staff.users');
+    Route::patch('/staf/pengaturan/notifikasi-marketing', [StaffAccountsController::class, 'updateMarketing'])->can('manage', User::class);
     Route::post('/staf/pengguna', [StaffAccountsController::class, 'store'])->can('manage', User::class);
     Route::patch('/staf/pengguna/{user}', [StaffAccountsController::class, 'update'])->can('manage', User::class);
 });

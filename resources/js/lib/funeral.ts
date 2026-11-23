@@ -50,6 +50,7 @@ export const roleLabels: Record<string, string> = {
     admin: 'Admin',
     manager: 'Manager',
     pic: 'PIC',
+    marketing: 'Marketing',
 };
 
 const siteLabels: Record<string, string> = {

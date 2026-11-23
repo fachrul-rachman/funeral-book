@@ -14,6 +14,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import FieldError from '../components/field-error';
+import Notice from '../components/notice';
 import {
     buttonClass,
     fieldClass,
@@ -87,6 +88,7 @@ const text = {
 const initial = {
     ...text,
     consent_accepted: false,
+    different_deceased_confirmed: false,
     documents: {} as Partial<Record<keyof typeof documentLabels, File>>,
 };
 type Name = keyof typeof text;
@@ -111,7 +113,7 @@ const stepFields: string[][] = [
         'estimated_burial_date',
         'estimated_burial_time',
     ],
-    ['consent_accepted'],
+    ['consent_accepted', 'different_deceased_confirmed'],
 ];
 const draftKey = 'funeral-form-draft';
 const draftNames = (Object.keys(text) as Name[]).filter(
@@ -278,6 +280,7 @@ export default function FuneralForm({
     const [step, setStep] = useState(draft?.step ?? 0);
     const [challengeError, setChallengeError] = useState('');
     const [networkError, setNetworkError] = useState('');
+    const [duplicateWarning, setDuplicateWarning] = useState('');
     const [token, setToken] = useState('');
     const heading = useRef<HTMLHeadingElement>(null);
     const errors = useRef<HTMLDivElement>(null);
@@ -360,7 +363,21 @@ export default function FuneralForm({
     ) {
         key.current = null;
         form.clearErrors(field);
-        form.setData((previous) => ({ ...previous, [field]: value }));
+        if (
+            field === 'applicant_whatsapp' ||
+            field === 'deceased_date_of_death'
+        ) {
+            setDuplicateWarning('');
+            form.clearErrors('different_deceased_confirmed');
+        }
+        form.setData((previous) => ({
+            ...previous,
+            different_deceased_confirmed:
+                field === 'different_deceased_confirmed'
+                    ? previous.different_deceased_confirmed
+                    : false,
+            [field]: value,
+        }));
     }
 
     function move(next: number) {
@@ -375,6 +392,7 @@ export default function FuneralForm({
         form.setData({ ...initial });
         form.clearErrors();
         setRestored(false);
+        setDuplicateWarning('');
         move(0);
     }
 
@@ -386,7 +404,8 @@ export default function FuneralForm({
             if (blank('applicant_name'))
                 found.applicant_name = 'Isi nama lengkap Anda.';
             if (blank('applicant_whatsapp'))
-                found.applicant_whatsapp = 'Isi nomor WhatsApp Anda.';
+                found.applicant_whatsapp =
+                    'Isi nomor WhatsApp pemohon/keluarga.';
             else if (!validApplicantPhone(data.applicant_whatsapp))
                 found.applicant_whatsapp =
                     'Gunakan nomor WhatsApp Indonesia berawalan 08, 62, atau +62 dengan 10 sampai 13 digit angka.';
@@ -432,6 +451,13 @@ export default function FuneralForm({
         if (current === 3 && !data.consent_accepted)
             found.consent_accepted =
                 'Centang persetujuan untuk melanjutkan pengajuan.';
+        if (
+            current === 3 &&
+            duplicateWarning &&
+            !data.different_deceased_confirmed
+        )
+            found.different_deceased_confirmed =
+                'Konfirmasikan bahwa pengajuan ini untuk orang yang berbeda, atau batalkan pengajuan.';
         return found;
     }
 
@@ -486,6 +512,21 @@ export default function FuneralForm({
             forceFormData: true,
             preserveScroll: true,
             onError: (serverErrors) => {
+                if (serverErrors.different_deceased_confirmed) {
+                    setDuplicateWarning(
+                        serverErrors.different_deceased_confirmed,
+                    );
+                    form.setData('different_deceased_confirmed', false);
+                    key.current = null;
+                    requestAnimationFrame(() =>
+                        document
+                            .getElementById(
+                                'field-different_deceased_confirmed',
+                            )
+                            ?.focus(),
+                    );
+                    return;
+                }
                 const first = stepFields
                     .slice(0, 3)
                     .findIndex((names) =>
@@ -789,10 +830,10 @@ export default function FuneralForm({
                                 {step === 0 && (
                                     <p className="text-sm text-navy/80 sm:text-base">
                                         Yang perlu disiapkan: nomor WhatsApp
-                                        Anda, nama almarhum/almarhumah, dan
-                                        perkiraan waktu pemakaman. KTP dan surat
-                                        kematian boleh menyusul. Tanda * berarti
-                                        wajib diisi.
+                                        pemohon/keluarga, nama
+                                        almarhum/almarhumah, dan perkiraan waktu
+                                        pemakaman. KTP dan surat kematian boleh
+                                        menyusul. Tanda * berarti wajib diisi.
                                     </p>
                                 )}
                                 {step === 1 || step === 2 ? (
@@ -822,8 +863,11 @@ export default function FuneralForm({
                                         )}
                                         {input(
                                             'applicant_whatsapp',
-                                            'Nomor WhatsApp Anda',
+                                            'Nomor WhatsApp pemohon/keluarga',
                                             'tel',
+                                            {
+                                                hint: 'Jika diisi oleh agen sales, gunakan nomor customer, bukan nomor agen.',
+                                            },
                                         )}
                                         {choose(
                                             'relationship_to_deceased',
@@ -1108,6 +1152,71 @@ export default function FuneralForm({
                                                     })}
                                             </ul>
                                         </section>
+                                        {duplicateWarning && (
+                                            <Notice
+                                                tone="warning"
+                                                title="Periksa kemungkinan pengajuan ganda"
+                                            >
+                                                <p id="duplicate-warning-text">
+                                                    {duplicateWarning}
+                                                </p>
+                                                <label className="flex min-h-11 items-start gap-3 pt-2">
+                                                    <input
+                                                        id="field-different_deceased_confirmed"
+                                                        type="checkbox"
+                                                        className="mt-0.5 size-5 shrink-0"
+                                                        required
+                                                        aria-invalid={
+                                                            form.errors
+                                                                .different_deceased_confirmed &&
+                                                            !form.data
+                                                                .different_deceased_confirmed
+                                                                ? true
+                                                                : undefined
+                                                        }
+                                                        aria-describedby="duplicate-warning-text"
+                                                        checked={
+                                                            form.data
+                                                                .different_deceased_confirmed
+                                                        }
+                                                        onChange={(event) =>
+                                                            update(
+                                                                'different_deceased_confirmed',
+                                                                event.target
+                                                                    .checked,
+                                                            )
+                                                        }
+                                                    />
+                                                    <span>
+                                                        Pengajuan ini untuk
+                                                        almarhum/almarhumah yang
+                                                        berbeda.
+                                                    </span>
+                                                </label>
+                                                {form.errors
+                                                    .different_deceased_confirmed &&
+                                                    form.errors
+                                                        .different_deceased_confirmed !==
+                                                        duplicateWarning && (
+                                                        <FieldError>
+                                                            {
+                                                                form.errors
+                                                                    .different_deceased_confirmed
+                                                            }
+                                                        </FieldError>
+                                                    )}
+                                                <button
+                                                    type="button"
+                                                    className={
+                                                        linkClass +
+                                                        ' min-h-11 text-sm'
+                                                    }
+                                                    onClick={startOver}
+                                                >
+                                                    Batalkan pengajuan baru
+                                                </button>
+                                            </Notice>
+                                        )}
                                         <section
                                             aria-labelledby="consent-heading"
                                             className="space-y-3 rounded-lg border border-navy/25 p-4"

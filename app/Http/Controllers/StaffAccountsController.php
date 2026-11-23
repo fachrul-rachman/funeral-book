@@ -20,7 +20,27 @@ class StaffAccountsController extends Controller
         return Inertia::render('staff-users', [
             'users' => User::query()->orderBy('phone')->get(['id', 'name', 'phone', 'role', 'active']),
             'roles' => User::ROLES,
+            'marketingWhatsApp' => DB::table('notification_settings')->where('id', 1)->value('marketing_whatsapp_e164'),
         ]);
+    }
+
+    public function updateMarketing(Request $request): RedirectResponse
+    {
+        $data = $request->validate(['marketing_whatsapp' => ['present', 'nullable', 'string', 'max:40']]);
+        $phone = filled($data['marketing_whatsapp']) ? User::normalizePhone($data['marketing_whatsapp']) : null;
+        if (filled($data['marketing_whatsapp']) && $phone === null) {
+            throw ValidationException::withMessages(['marketing_whatsapp' => 'Masukkan nomor WhatsApp yang valid.']);
+        }
+        DB::transaction(function () use ($request, $phone) {
+            $actor = User::query()->whereKey($request->user()?->getAuthIdentifier())->lockForUpdate()->firstOrFail();
+            abort_unless($actor->access_version === $request->session()->get('staff_access_version'), 403);
+            Gate::forUser($actor)->authorize('manage', User::class);
+            DB::table('notification_settings')->where('id', 1)->update([
+                'marketing_whatsapp_e164' => $phone, 'updated_by' => $actor->id, 'updated_at' => now()->utc(),
+            ]);
+        });
+
+        return to_route('staff.users');
     }
 
     public function store(Request $request): RedirectResponse

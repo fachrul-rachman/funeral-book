@@ -25,11 +25,13 @@ class PublicFuneralSubmission
             'key' => $request->is('api/*') ? $request->header('Idempotency-Key') : $request->input('submission_key'),
             'website' => $request->input('website'),
             'documents' => $request->file('documents', []),
+            'different_deceased_confirmed' => $request->input('different_deceased_confirmed', false),
         ], [
             'key' => ['required', 'uuid'],
             'website' => ['prohibited'],
             'documents' => ['array:ownership_certificate,plot_owner_ktp,deceased_ktp,hospital_death_certificate,embassy_death_certificate', 'max:5'],
             'documents.*' => ['required', 'file', 'max:5120'],
+            'different_deceased_confirmed' => ['required', 'boolean'],
         ])->validate();
         if ($request->has('documents') && ! is_array($request->input('documents', []))) {
             throw ValidationException::withMessages(['documents' => 'Format dokumen tidak valid.']);
@@ -63,7 +65,16 @@ class PublicFuneralSubmission
             }));
             if ($reference === null) {
                 try {
-                    $reference = $this->requests->submit($request->all(), $files, ['digest' => $key, 'fingerprint' => $fingerprint]);
+                    $reference = $this->requests->submit($request->all(), $files, [
+                        'digest' => $key, 'fingerprint' => $fingerprint,
+                        'different_deceased_confirmed' => (bool) $envelope['different_deceased_confirmed'],
+                    ]);
+                } catch (ValidationException $error) {
+                    if (array_key_exists('different_deceased_confirmed', $error->errors())) {
+                        RateLimiter::decrement($ip);
+                        RateLimiter::decrement($phone);
+                    }
+                    throw $error;
                 } catch (UniqueConstraintViolationException $error) {
                     $reference = $this->replay($key, $fingerprint) ?? throw $error;
                 }

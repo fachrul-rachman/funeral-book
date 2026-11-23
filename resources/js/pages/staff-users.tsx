@@ -3,6 +3,7 @@ import { Save, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import ConfirmDialog from '../components/confirm-dialog';
+import FieldError from '../components/field-error';
 import Notice from '../components/notice';
 import PasswordInput from '../components/password-input';
 import PhoneInput from '../components/phone-input';
@@ -177,11 +178,14 @@ function AccountForm({
 export default function StaffUsers({
     users,
     roles,
+    marketingWhatsApp,
 }: {
     users: Account[];
     roles: string[];
+    marketingWhatsApp: string | null;
 }) {
-    const [editing, setEditing] = useState<string | 'new' | null>(null);
+    const [editing, setEditing] = useState<string | null>(null);
+    const marketing = useForm({ marketing_whatsapp: marketingWhatsApp ?? '' });
     return (
         <StaffLayout>
             <main className="space-y-5 p-4 sm:p-7 xl:p-9">
@@ -204,6 +208,66 @@ export default function StaffUsers({
                         </button>
                     )}
                 </header>
+                <section className="rounded-lg border border-navy/20 bg-white p-5">
+                    <h2 className="font-semibold">Notifikasi marketing</h2>
+                    <p className="mt-1 text-sm text-navy/75">
+                        Penerima tambahan untuk pengajuan yang belum memiliki
+                        lahan. Kosongkan untuk menonaktifkan.
+                    </p>
+                    <form
+                        className="mt-4 max-w-xl space-y-3"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            marketing.patch(
+                                '/staf/pengaturan/notifikasi-marketing',
+                                { preserveScroll: true },
+                            );
+                        }}
+                    >
+                        <label className="block text-sm font-medium">
+                            Nomor WhatsApp marketing (opsional)
+                            <span className="mt-1 block">
+                                <PhoneInput
+                                    value={marketing.data.marketing_whatsapp}
+                                    disabled={marketing.processing}
+                                    invalid={
+                                        !!marketing.errors.marketing_whatsapp
+                                    }
+                                    aria-describedby={
+                                        marketing.errors.marketing_whatsapp
+                                            ? 'marketing-phone-error'
+                                            : undefined
+                                    }
+                                    onValueChange={(value) =>
+                                        marketing.setData(
+                                            'marketing_whatsapp',
+                                            value,
+                                        )
+                                    }
+                                />
+                            </span>
+                        </label>
+                        {marketing.errors.marketing_whatsapp && (
+                            <FieldError id="marketing-phone-error">
+                                {marketing.errors.marketing_whatsapp}
+                            </FieldError>
+                        )}
+                        {marketing.recentlySuccessful && (
+                            <Notice tone="success">
+                                Pengaturan marketing tersimpan.
+                            </Notice>
+                        )}
+                        <button
+                            className={buttonClass}
+                            disabled={marketing.processing}
+                        >
+                            <Save className="size-4" aria-hidden="true" />
+                            {marketing.processing
+                                ? 'Menyimpan…'
+                                : 'Simpan nomor marketing'}
+                        </button>
+                    </form>
+                </section>
                 {editing === 'new' && (
                     <AccountForm
                         roles={roles}
